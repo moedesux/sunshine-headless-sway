@@ -1,54 +1,80 @@
 #!/bin/bash
-# Stops a Lutris game launched via start-lutris-game.sh
-# Usage: stop-lutris-game.sh [lutris_game_id]
-#   Without arguments: stops ANY Lutris game process in the headless session
-#   With game ID: stops only the process matching that specific game's rungameid URI
+# Shuts down ALL Lutris processes system-wide, cleans up session files, then
+# restarts Lutris on the main desktop (wayland-0).
+#
+# This is used as prep-cmd.undo for Lutris entries in apps.json.
+#
+# CRITICAL: The script path contains "lutris" so pgrep -f "lutris" matches
+# the script itself. We exclude our own PID and parent PID to prevent
+# self-termination before restart completes.
 
-GAME_ID="$1"
+LOG="$HOME/.config/sway-sunshine/stop-lutris-game.log"
+touch "$LOG" 2>/dev/null
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"
+}
 
-# Build the pgrep pattern based on whether a game ID was provided
-if [ -z "$GAME_ID" ]; then
-    # No argument: match ANY Lutris game process (rungameid/ without specific ID)
-    PATTERN="lutris:rungameid/"
-else
-    # Game ID provided: match only this specific game
-    PATTERN="lutris:rungameid/$GAME_ID"
-fi
+log "=== stop-lutris-game.sh started ==="
 
-# Find and kill the game process(es)
-# Lutris launches the game with the rungameid URI in its process args
-MATCHED_PIDS=$(pgrep -f "$PATTERN" 2>/dev/null || true)
+# Helper: get Lutris PIDs excluding our own process tree
+# pgrep -f "lutris" matches this script's own path, so we exclude $$ and $PPID
+get_lutris_pids() {
+    _my_pid=$$
+    pgrep -f "lutris" 2>/dev/null | grep -v "^${PPID}$" | grep -v "^${_my_pid}$" || true
+}
 
-if [ -z "$MATCHED_PIDS" ]; then
-    exit 0
-fi
+# --- Shut down ALL Lutris processes (including children) ---
+log "Shutting down all Lutris processes..."
+LUTRIS_PIDS=$(get_lutris_pids)
 
-# Send SIGTERM to matched processes
-for PID in $MATCHED_PIDS; do
-    kill "$PID" 2>/dev/null
-done
-
-# Wait for graceful shutdown
-for i in $(seq 1 15); do
-    ALL_EXITED=true
-    for PID in $MATCHED_PIDS; do
-        if kill -0 "$PID" 2>/dev/null; then
-            ALL_EXITED=false
-            break
-        fi
+if [ -n "$LUTRIS_PIDS" ]; then
+    for PID in $LUTRIS_PIDS; do
+        kill -TERM "$PID" 2>/dev/null
     done
-    $ALL_EXITED && break
+else
+    log "No Lutris processes found."
+fi
+
+# Wait for all Lutris-related processes to exit
+log "Waiting for Lutris processes to exit..."
+for i in $(seq 1 30); do
+    LUTRIS_PIDS=$(get_lutris_pids)
+    if [ -z "$LUTRIS_PIDS" ]; then
+        break
+    fi
     sleep 1
 done
 
-# Force kill any remaining processes
-for PID in $MATCHED_PIDS; do
-    if kill -0 "$PID" 2>/dev/null; then
-        kill -9 "$PID" 2>/dev/null
-    fi
-done
+# Force kill any remaining Lutris processes
+LUTRIS_PIDS=$(get_lutris_pids)
+if [ -n "$LUTRIS_PIDS" ]; then
+    log "Some Lutris processes still running, force killing..."
+    for PID in $LUTRIS_PIDS; do
+        kill -KILL "$PID" 2>/dev/null
+    done
+    sleep 2
+fi
 
-sleep 1
+# Double-check everything is gone
+LUTRIS_PIDS=$(get_lutris_pids)
+if [ -n "$LUTRIS_PIDS" ]; then
+    log "WARNING: Lutris processes still running after SIGKILL: $LUTRIS_PIDS"
+else
+    log "All Lutris processes terminated."
+fi
 
-# Final cleanup: kill any remaining processes matching the pattern
-pkill -f "$PATTERN" 2>/dev/null
+# --- Clean up session tracking files ---
+log "Cleaning up Lutris session files..."
+rm -f /tmp/lutris-* 2>/dev/null
+
+# --- Restart Lutris on the main desktop ---
+log "Restarting Lutris on main desktop (wayland-0)..."
+if command -v systemd-run >/dev/null 2>&1; then
+    log "Using systemd-run to launch Lutris..."
+    systemd-run --user --scope --unit=lutris-restore-wayland-0 lutris --open &
+    log "Lutris launch command sent via systemd-run."
+else
+    log "ERROR: systemd-run not found. Cannot restart Lutris."
+fi
+
+log "=== stop-lutris-game.sh finished ==="

@@ -121,15 +121,16 @@ Shuts down ALL Steam processes system-wide and cleans up IPC. Used as **prep-cmd
 Thin wrapper that writes the sway-sunshine process PID to `/run/user/$USER_ID/sway-sunshine.pid` before exec'ing sway. Uses an EXIT trap to clean up the PID file. This enables external tools (install.sh) to detect and gracefully stop a running sway-sunshine session. Used as the `ExecStart` target in `sway-sunshine.service` instead of calling sway directly.
 
 ### `start-lutris-game.sh`
-Launches a Lutris-managed game in the headless Sway session. Used via `detached` in apps.json entries. Handles:
-- Checks for Sway IPC socket existence before launching
-- Looks up Lutris game by slug if argument isn't a numeric game ID
-- Sets `WAYLAND_DISPLAY=wayland-1` for the headless session
-- Launches the game via the Lutris runtime in the headless session
-- Accepts a Lutris app slug or game ID as argument
+Launches a Lutris game in the headless Sway session. **Kills ALL Lutris processes system-wide** (including any running on the main desktop) before launching in the headless session. Used via `detached` in apps.json entries. Handles:
+- Checks for Sway IPC socket existence (`sway-sunshine.sock`) before launching
+- Graceful shutdown of any existing Lutris instance (`SIGTERM`, wait up to 15s, fallback to `SIGKILL`)
+- Cleanup of Lutris session tracking files (`/tmp/lutris-*`) to prevent DBus single-instance detection
+- Uses `get_lutris_pids()` helper to exclude its own PID and parent PID from `pgrep -f "lutris"` results (prevents self-termination since the script path contains "lutris")
+- Launches via `swaymsg exec` in the headless session
+- Accepts: `<lutris_game_id>` (launches game), or `lutris` (opens Lutris UI)
 
 ### `stop-lutris-game.sh`
-Stops the Lutris-managed game running in the headless Sway session. Used as **prep-cmd.undo** for Lutris entries. Kills the game process and cleans up any leftover state.
+Shuts down ALL Lutris processes system-wide, cleans up session files, then **restarts Lutris on the main desktop** (`wayland-0`). Used as **prep-cmd.undo** for Lutris entries. Uses `get_lutris_pids()` to exclude its own PID from kill targets (prevents self-termination).
 
 > **Note:** `start-lutris-game.sh` and `stop-lutris-game.sh` are automatically installed by `install.sh`.
 
@@ -215,7 +216,7 @@ Lutris games use the `detached` field with `start-lutris-game.sh`, similar to St
 }
 ```
 
-Lutris undo uses `stop-lutris-game.sh` as the resolution undo hook, matching the pattern of using the game-stop script as cleanup.
+Lutris undo uses `stop-lutris-game.sh` which kills ALL Lutris processes system-wide, cleans up session files, and restarts Lutris on the main desktop — matching the Steam migration pattern.
 
 ### Heroic detached entries
 
