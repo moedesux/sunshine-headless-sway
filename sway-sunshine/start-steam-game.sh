@@ -12,9 +12,16 @@ SWAYSOCK="/run/user/$(id -u)/sway-sunshine.sock"
 export WAYLAND_DISPLAY
 export SWAYSOCK
 
+
+
+
 LOG_FILE="$HOME/.config/sway-sunshine/start-steam-game.log"
 echo "[$(date)] Environment: WAYLAND_DISPLAY=$WAYLAND_DISPLAY, SWAYSOCK=$SWAYSOCK" >> "$LOG_FILE"
 echo "[$(date)] Launching Steam game $APPID" >> "$LOG_FILE"
+
+echo "Unlocking session" >> "$LOG_FILE"
+loginctl unlock-session
+
 
 if [ -z "$APPID" ]; then
     echo "Usage: $0 <steam_appid|bigpicture|0>"

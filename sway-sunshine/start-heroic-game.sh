@@ -16,6 +16,9 @@ export SWAYSOCK
 LOG_FILE="$HOME/.config/sway-sunshine/start-heroic-game.log"
 echo "[$(date)] Environment: WAYLAND_DISPLAY=$WAYLAND_DISPLAY, SWAYSOCK=$SWAYSOCK" >> "$LOG_FILE"
 
+echo "Unlocking session" >> "$LOG_FILE"
+loginctl unlock-session
+
 # Validate both arguments are provided
 if [ -z "$RUNNER" ]; then
     echo "Usage: $0 <runner> <game_id>"
