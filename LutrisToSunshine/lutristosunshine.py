@@ -2,6 +2,7 @@ import sys
 import os
 import argparse
 import re
+import shlex
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Tuple
 
@@ -16,7 +17,7 @@ from sunshine.sunshine import (
     set_installation_type,
     set_server_name,
 )
-from utils.utils import handle_interrupt, get_games_found_message
+from utils.utils import handle_interrupt, get_games_found_message, run_command
 from utils.input import get_menu_choice, get_user_input, get_yes_no_input, get_user_selection
 from utils.terminal import accent, badge, heading, muted, state_text
 from sunshine.sunshine import (
@@ -33,9 +34,15 @@ from sunshine.sunshine import (
 )
 from utils.steamgriddb import manage_api_key, download_image_from_steamgriddb
 from launchers.heroic import list_heroic_games, get_heroic_command, HEROIC_PATHS
-from launchers.lutris import list_lutris_games, get_lutris_command, is_lutris_running
+from launchers.lutris import list_lutris_games, list_lutris_games_with_paths, get_lutris_command, is_lutris_running
 from launchers.bottles import detect_bottles_installation, list_bottles_games
-from launchers.steam import detect_steam_installation, list_steam_games, get_steam_command
+from launchers.steam import (
+    detect_steam_installation,
+    list_steam_games,
+    get_steam_command,
+    list_steam_nonsteam_game_names,
+    add_nonsteam_game_to_vdf,
+)
 from launchers.faugus import detect_faugus_installation, list_faugus_games
 from launchers.ryubing import detect_ryubing_installation, list_ryubing_games
 from launchers.retroarch import detect_retroarch_installation, list_retroarch_games
@@ -270,6 +277,27 @@ def parse_args(argv=None):
         type=int,
         default=80,
         help="Number of log lines to show.",
+    )
+
+    to_steam_parser = subparsers.add_parser(
+        "to-steam",
+        help="Import Lutris games into Steam as non-Steam games with direct executable paths.",
+    )
+    to_steam_parser.set_defaults(command="to-steam")
+    to_steam_parser.add_argument(
+        "--cover",
+        action="store_true",
+        help="Download SteamGridDB covers for the non-Steam game entries.",
+    )
+    to_steam_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Automatically add all games (skips selection prompt).",
+    )
+    to_steam_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force add games even if they already exist in Steam (overwrites existing entries).",
     )
 
     return parser.parse_args(argv)
@@ -770,6 +798,103 @@ def handle_display_command(args) -> int:
     return 1
 
 
+def handle_to_steam_command(args) -> int:
+    """Handle the --to-steam subcommand: import Lutris games into Steam as non-Steam games."""
+    # Check Steam is installed
+    steam_installed, steam_type = detect_steam_installation()
+    if not steam_installed:
+        print("Error: Steam is not installed. Cannot add non-Steam games.")
+        return 1
+
+    # Check Lutris is installed
+    lutris_cmd = get_lutris_command()
+    if not lutris_cmd:
+        print("Error: Lutris is not installed.")
+        return 1
+
+    if is_lutris_running():
+        print("Error: Lutris is running. Please close Lutris and try again.")
+        return 1
+
+    # Check if Steam is running
+    steam_running = run_command("pgrep -x steam").returncode == 0
+    if steam_running:
+        print("Warning: Steam is running. It must be closed to add non-Steam games.")
+        if not get_yes_no_input("Close Steam and continue?", default=False):
+            return 1
+
+    # List Lutris games with resolved paths
+    print("Resolving Lutris game paths...")
+    lutris_games = list_lutris_games_with_paths()
+
+    if not lutris_games:
+        print("No Lutris games with resolvable executable paths found.")
+        return 1
+
+    print(f"Found {len(lutris_games)} Lutris game(s) with resolvable paths.")
+
+    # Get existing Steam non-steam games to filter duplicates (unless --force)
+    existing_names = set() if args.force else list_steam_nonsteam_game_names()
+
+    # Filter out duplicates
+    available_games = [(gid, name, cmd) for gid, name, cmd in lutris_games if name not in existing_names]
+    skipped = len(lutris_games) - len(available_games)
+
+    if skipped > 0 and not args.force:
+        print(f"Skipped {skipped} game(s) already in Steam.")
+
+    if not available_games:
+        print("No new games to add. All Lutris games are already in Steam.")
+        return 0
+
+    # Display and select
+    print("")
+    for idx, (gid, name, cmd) in enumerate(available_games):
+        exe = cmd.split()[0] if cmd.split() else "?"
+        print(f"{idx + 1}. {name}")
+        print(f"   {muted(exe)}")
+
+    if args.all:
+        selected = available_games
+    else:
+        selected_indices = get_user_selection([(name, name) for _, name, _ in available_games])
+        selected = [available_games[i] for i in selected_indices]
+
+    if not selected:
+        print("No games selected.")
+        return 0
+
+    # Download covers if requested
+    api_key = None
+    if args.cover:
+        api_key = manage_api_key()
+
+    # Add each game
+    added = 0
+    failed = 0
+    for gid, name, cmd in selected:
+        # Extract exe and start_dir from command
+        parts = shlex.split(cmd)
+        exe = parts[0] if parts else ""
+        start_dir = os.path.dirname(exe) if exe else ""
+
+        # Download cover if requested
+        icon_path = None
+        if args.cover and api_key:
+            print(f"Downloading cover for '{name}'...")
+            icon_path = download_image_from_steamgriddb(name, api_key)
+
+        # Add to Steam
+        if add_nonsteam_game_to_vdf(name, exe, start_dir, icon_path, force=args.force):
+            added += 1
+        else:
+            failed += 1
+
+    print(f"\nDone. Added {added} game(s) to Steam. Failed: {failed}.")
+    print("Note: You may need to restart Steam for the games to appear.")
+    return 0
+
+
 def main(argv=None):
     def prompt_server_connection() -> Tuple[str, int]:
         current_host, current_port = get_api_connection()
@@ -814,6 +939,8 @@ def main(argv=None):
     args = parse_args(argv)
     if args.command == "display":
         raise SystemExit(handle_display_command(args))
+    if args.command == "to-steam":
+        raise SystemExit(handle_to_steam_command(args))
     try:
         sunshine_installed, sunshine_install_type = detect_sunshine_installation()
         apollo_installed = detect_apollo_installation()

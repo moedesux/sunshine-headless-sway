@@ -3,16 +3,22 @@
 ## Project Structure & Module Organization
 - `lutristosunshine.py`: CLI entrypoint that orchestrates launcher discovery, Sunshine checks, user prompts, and game import.
 - `config/`: constants such as API defaults and color codes.
-- `launchers/`: per-launcher integrations (`lutris.py`, `heroic.py`, `bottles.py`, `steam.py`, `ryubing.py`, `retroarch.py`) that list games and expose launch commands.
+- `launchers/`: per-launcher integrations (`lutris.py`, `heroic.py`, `bottles.py`, `steam.py`, `ryubing.py`, `retroarch.py`) that list games, expose launch commands, and handle non-Steam game VDF management for Steam integration.
 - `sunshine/`: Sunshine API helpers for installation detection, token management, and app creation.
 - `utils/`: shared helpers for input handling, command execution, parsing, and SteamGridDB downloads.
-- `requirements.txt`: Python runtime deps (`requests`, `Pillow`). No bundled tests yet.
+- `requirements.txt`: Python runtime deps (`requests`, `Pillow`, `vdf`, `evdev`). No bundled tests yet.
 
 ## Build, Test, and Development Commands
 - Install deps: `pip install -r requirements.txt` (use venv if possible).
 - Run tool: `python3 lutristosunshine.py` (ensure Sunshine is running; Lutris must be closed).
 - Optional binary: use released `./lutristosunshine` after `chmod +x` if available.
 - No automated test suite; validate changes by exercising the CLI against at least one launcher and confirming Sunshine receives new apps.
+- Import Lutris games into Steam as non-Steam games:
+  ```bash
+  python3 lutristosunshine.py to-steam
+  python3 lutristosunshine.py to-steam --all
+  python3 lutristosunshine.py to-steam --all --cover
+  ```
 
 ## Coding Style & Naming Conventions
 - Python 3, 4-space indents, prefer PEP 8 casing (`snake_case` for functions/vars, `CamelCase` for classes if added).

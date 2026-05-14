@@ -1,3 +1,4 @@
 evdev
 requests
 Pillow
+vdf

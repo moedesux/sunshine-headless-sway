@@ -94,11 +94,32 @@ Import using a custom Sunshine web UI port:
 python3 lutristosunshine.py --sunshine-port 10000
 ```
 
+### Steam Non-Steam Games Import
+
+Import Lutris games into Steam as non-Steam games with direct executable paths. Steam must be closed before running this command. Covers download from SteamGridDB and set the grid thumbnail icon (hero/banner images must be set manually in Steam UI via right-click → manage → Set Custom Background).
+
+```bash
+# Interactive import (select games one by one):
+python3 lutristosunshine.py to-steam
+
+# Import all Lutris games at once:
+python3 lutristosunshine.py to-steam --all
+
+# Import all games with SteamGridDB cover downloads:
+python3 lutristosunshine.py to-steam --all --cover
+
+# Force overwrite existing entries:
+python3 lutristosunshine.py to-steam --force
+```
+
+Games that already exist in Steam's non-Steam game list are automatically skipped (use `--force` to overwrite).
+
 ### Main Flags
 
 - `--all`: add all detected games without the selection prompt
 - `--cover`: download SteamGridDB covers for added games
 - `--force`: add games even if they already exist in Sunshine (overwrites existing entries)
+- `--force`: force add games even if they already exist in Steam (for `to-steam` subcommand)
 - `--sunshine-host`: override the Sunshine or Apollo web UI host for auth and API requests
 - `--sunshine-port`: override the Sunshine or Apollo web UI port for auth and API requests; this is usually `47990`
 
