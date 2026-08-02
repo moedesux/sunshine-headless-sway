@@ -459,6 +459,78 @@ Document any new findings in AGENTS.md as you discover them.
 
 **Key insight:** The XR24 errors are from Sway's Vulkan renderer, not from Sunshine. They're a wlroots 0.19.3 bug on the headless backend. The stream may work despite these errors if frame capture succeeds.
 
+## Current host snapshot (2026-08-02)
+
+This section records the live configuration inspected on 2026-08-02. It is a diagnostic snapshot, not a replacement for the repository templates above.
+
+### Host and GPU
+
+- User is `moe` (UID 1000), running KDE Plasma Wayland (`XDG_CURRENT_DESKTOP=KDE`).
+- The machine has an NVIDIA GeForce RTX 5090 (PCI vendor `10de`) and an AMD Strix Halo/Radeon 8050S/8060S display controller (vendor `1002`). Both `nvidia`/`nvidia_drm` and `amdgpu` kernel modules are loaded.
+- Installed NVIDIA userspace is 610.43.03; the active Sunshine log confirms NVENC rather than VAAPI/software encoding.
+- The configured render node is `/dev/dri/renderD129`. Keep this aligned across `WLR_DRM_DEVICES` and Sunshine `adapter_name`; verify node numbering after driver or kernel changes because render numbers are not a permanent hardware identity.
+
+### Live Wayland and service topology
+
+The main KDE socket is `wayland-0`; the headless Sway socket is `wayland-1`. The live session also has `/run/user/1000/sway-sunshine.sock` and a PID file. The intended boot path is:
+
+```text
+default.target
+  └─ sway-sunshine.service (headless wlroots/Sway compositor)
+       └─ sunshine-headless.service (Sunshine capture/encode server)
+            └─ Moonlight client on the TV (network client)
+```
+
+`sway-sunshine.service` is enabled through `default.target`; it uses `WLR_BACKENDS=headless`, `WLR_RENDERER=gles2`, `LIBSEAT_BACKEND=noop`, `WLR_LIBINPUT_NO_DEVICES=1`, `WLR_DRM_DEVICES=/dev/dri/renderD129`, and `WAYLAND_DISPLAY=wayland-1`. The wrapper at `~/.config/sway-sunshine/sway-wrapper.sh` records `/run/user/1000/sway-sunshine.pid` and then starts Sway.
+
+`sunshine-headless.service` requires the Sway service, waits two seconds, exports the same Wayland/Sway socket, and currently runs `/usr/bin/sunshine` directly. The checked-in template still uses `/usr/bin/sg input -c /usr/bin/sunshine`; this is an intentional live/template drift and must be resolved deliberately before the next deployment. Do not assume `systemctl --user` status from a restricted diagnostic shell; use a normal user session or inspect the Sunshine log and socket files.
+
+There is also a separate `~/.config/systemd/user/sunshine.service` unit. It is not part of the headless dependency chain and can conflict with the headless instance if enabled, because it starts another `/usr/bin/sunshine` with the same user configuration and network ports. Use only `sunshine-headless.service` for this setup unless the standalone unit is intentionally redesigned.
+
+### Live Sunshine and audio configuration
+
+`~/.config/sunshine/sunshine.conf` currently contains:
+
+```ini
+adapter_name = /dev/dri/renderD129
+audio_sink = sink-sunshine-stereo
+capture = wlr
+min_threads = 6
+minimum_fps_target = 20
+nvenc_preset = 3
+```
+
+Capture is WLR screencopy from Sway, not KWin. `adapter_name` pins DMA-BUF imports to the GPU used by Sway; the log shows `h264_nvenc`, `hevc_nvenc`, and `av1_nvenc` all available. The live log also shows successful capture of `HEADLESS-1`, a client session at 1920x1080, and the encoder switching to HEVC NVENC.
+
+PipeWire creates the null sink `sink-sunshine-stereo` from `pipewire/sunshine-null-sink.conf`. Sunshine selects it on connection; `restore-default-sink.sh` starts a detached user watcher to restore the original host sink after disconnect.
+
+### Sway output, input, and game launch
+
+The Sway config disables physical outputs, enables `HEADLESS-1`, and advertises 1920x1080@60 plus 3840x2160@120. Sunshine prep commands change the mode to the Moonlight client's requested width, height, and FPS, then reset to 1080p/60 on disconnect. All physical input events are disabled; Sunshine virtual keyboard, mouse, touch, pen, and PS5-pad devices are explicitly enabled.
+
+The live `apps.json` is Sunshine v2 with 18 entries. Most entries launch through detached helper scripts: Lutris (IDs such as 6, 10, 16, 19, 21, 24, 25, 26, 28), Heroic/Legendary, or Steam (appid 3130330 and Big Picture). Entries consistently run sink restoration and dynamic resolution; game-specific undo scripts stop the relevant launcher. The low-resolution desktop entry is an exception and still uses an `xrandr` command targeting `HDMI-1`, which belongs to the physical desktop rather than the headless Sway output.
+
+The installed launcher scripts hardcode `WAYLAND_DISPLAY=wayland-1` and use `/run/user/$(id -u)/sway-sunshine.sock`; resolution scripts use `/run/user/1000`. If the headless socket changes, update source templates and redeploy rather than editing `~/.config` manually. Steam and Lutris helpers intentionally terminate all matching processes system-wide before launching in headless Sway; this can close a desktop game/launcher.
+
+### Verified streaming evidence
+
+`~/.config/sunshine/sunshine.log` from 2026-08-02 records Sunshine 2026.516 discovering `wayland-1`, `HEADLESS-1`, WLR screencopy, all three NVENC codecs, running the prep commands, starting Steam Big Picture, and accepting a client connection. This confirms the capture/encode path has worked on the current host. Credentials, certificates, API keys, and portal tokens under `~/.config/sunshine/credentials/` are intentionally not copied into this repository or this document.
+
+## Operational checks
+
+Run these from the real KDE user session (not a sandboxed shell):
+
+```bash
+systemctl --user status sway-sunshine.service sunshine-headless.service
+journalctl --user -u sunshine-headless.service -n 100 --no-pager
+ls -la /run/user/$(id -u)/wayland-* /run/user/$(id -u)/sway-sunshine.*
+grep -E 'WAYLAND_DISPLAY|WLR_DRM_DEVICES|ExecStart' ~/.config/systemd/user/{sway-sunshine,sunshine-headless}.service
+grep -iE 'encoder|nvenc|vcn|CLIENT CONNECTED|Frame capture|error|fatal' ~/.config/sunshine/sunshine.log | tail -100
+flatpak run com.moonlight_stream.Moonlight stream localhost "Portal 2"
+```
+
+To change configuration, edit the corresponding repository file, review the diff, and run `./install.sh`. The installer may require package installation and system udev changes; it currently invokes `sudo` internally, so run it interactively and review its prompts. Never hand-edit the live service/config copies as the normal workflow, never push to a remote without explicit consent, and never kill the llama-server process.
+
 ### Heroic Games Launcher
 
 Heroic Games Launcher is supported through `launchers/heroic.py`:
@@ -475,4 +547,4 @@ Heroic Games Launcher is supported through `launchers/heroic.py`:
 
 ## Working Commit Reference
 
-Working commit: `f8bba00397972d1b0200c0242c84f3c67db4e8a4`
+Working commit at the time of this snapshot: `6146626` (`fix: use recursive process tree kill to terminate Wine/Proton children`).
