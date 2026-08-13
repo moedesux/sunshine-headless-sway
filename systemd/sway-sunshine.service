@@ -23,6 +23,10 @@ Environment=PULSE_SINK=sink-sunshine-stereo
 Environment=WLR_DRM_DEVICES=/dev/dri/renderD129
 Environment=WAYLAND_DISPLAY=wayland-1
 Environment=DISPLAY=:0
+Environment=__GL_GSYNC_ALLOWED=0
+Environment=__NV_PRIME_RENDER_OFFLOAD=1
+Environment=__VK_LAYER_NV_optimus=NVIDIA_only
+UnsetEnvironment=__EGL_VENDOR_LIBRARY_FILENAMES
 ExecStart=%h/.config/sway-sunshine/sway-wrapper.sh
 Restart=on-failure
 RestartSec=5

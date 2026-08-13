@@ -11,6 +11,10 @@ Environment=XDG_SESSION_TYPE=wayland
 Environment=XDG_CURRENT_DESKTOP=sway
 Environment=KWIN_DRM_NO_DIRECT_SCANOUT=1
 Environment=KWIN_FORCE_SW_CURSOR=1
+Environment=__GL_GSYNC_ALLOWED=0
+Environment=__NV_PRIME_RENDER_OFFLOAD=1
+Environment=__VK_LAYER_NV_optimus=NVIDIA_only
+UnsetEnvironment=__EGL_VENDOR_LIBRARY_FILENAMES
 ExecStartPre=/bin/sleep 2
 ExecStart=/usr/bin/sg input -c /usr/bin/sunshine
 Restart=on-failure

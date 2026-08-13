@@ -459,6 +459,41 @@ Document any new findings in AGENTS.md as you discover them.
 
 **Key insight:** The XR24 errors are from Sway's Vulkan renderer, not from Sunshine. They're a wlroots 0.19.3 bug on the headless backend. The stream may work despite these errors if frame capture succeeds.
 
+## Hyprland / uwsm Session Env Injection: EGL Black Screen
+
+**Symptom:** Streaming works on KDE Plasma but on Hyprland (omarchy) Moonlight shows a black screen with green/white horizontal noise lines, same boot, same NVIDIA driver.
+
+**Root cause:** Hyprland is launched through uwsm. `~/.config/uwsm/env-hyprland` exports `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json`, which uwsm pushes into the systemd user manager via DBus SetEnvironment. Every user service (including sunshine-headless.service and sway-sunshine.service) inherits it. GLVND is then restricted to Mesa-only EGL, so Sunshine cannot init NVIDIA EGL on `adapter_name=/dev/dri/renderD129`:
+- `Couldn't initialize EGL display: [00003001]` (EGL_NOT_INITIALIZED) on NVENC/Vulkan/VAAPI
+- falls back to software libx264
+- every wlr-screencopy frame fails DMABUF import: `Couldn't import RGB Image: 00003009` (EGL_BAD_MATCH)
+- result: black screen + noise
+
+KDE Plasma is started directly by SDDM (`plasma.desktop`) and never sources uwsm env, so this var is absent and streaming works.
+
+**Fix (in both `systemd/sway-sunshine.service` and `systemd/sunshine-headless.service`):**
+
+```ini
+UnsetEnvironment=__EGL_VENDOR_LIBRARY_FILENAMES
+```
+
+`UnsetEnvironment=` strips the var only from those units' processes (the manager retains it globally, which is fine). Verified 2026-08-13: stream uses hevc_nvenc at 60 FPS with zero import errors.
+
+**Optional NVIDIA PRIME knobs** (folded into the templates for exact reproduction, but NOT required for streaming — they only affect X11/GLX/Vulkan PRIME render-offload for desktop apps):
+
+```ini
+Environment=__GL_GSYNC_ALLOWED=0
+Environment=__NV_PRIME_RENDER_OFFLOAD=1
+Environment=__VK_LAYER_NV_optimus=NVIDIA_only
+```
+
+**Debugging tip:** verify what the DE injects with:
+```bash
+systemctl --user show-environment | grep -i egl
+```
+
+**Note:** The old diagnosis that these 3 vars were 'inherited from the Hyprland session' was WRONG — they come from live-only drop-in overrides (`~/.config/systemd/user/*.service.d/override.conf`) present on both DEs and are constant. The true DE-specific differentiator is only `__EGL_VENDOR_LIBRARY_FILENAMES`.
+
 ## Current host snapshot (2026-08-02)
 
 This section records the live configuration inspected on 2026-08-02. It is a diagnostic snapshot, not a replacement for the repository templates above.
