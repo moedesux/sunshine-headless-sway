@@ -11,7 +11,21 @@
       "prep-cmd": [
         {
           "do": "/home/YOUR_USER/.config/sway-sunshine/restore-default-sink.sh",
-          "undo": ""
+          "undo": "/home/moe/.config/sway-sunshine/restore-default-sink.sh"
+        },
+        {
+          "do": "/home/YOUR_USER/.config/sway-sunshine/set-resolution.sh",
+          "undo": "/home/YOUR_USER/.config/sway-sunshine/reset-resolution.sh"
+        }
+      ]
+    },
+    {
+      "name": "Low Res Desktop",
+      "image-path": "desktop.png",
+      "prep-cmd": [
+        {
+          "do": "/home/YOUR_USER/.config/sway-sunshine/restore-default-sink.sh",
+          "undo": "/home/moe/.config/sway-sunshine/restore-default-sink.sh"
         },
         {
           "do": "/home/YOUR_USER/.config/sway-sunshine/set-resolution.sh",
@@ -27,7 +41,7 @@
       "prep-cmd": [
         {
           "do": "/home/YOUR_USER/.config/sway-sunshine/restore-default-sink.sh",
-          "undo": ""
+          "undo": "/home/moe/.config/sway-sunshine/restore-default-sink.sh"
         },
         {
           "do": "/home/YOUR_USER/.config/sway-sunshine/set-resolution.sh",
@@ -44,7 +58,7 @@
       "prep-cmd": [
         {
           "do": "/home/YOUR_USER/.config/sway-sunshine/restore-default-sink.sh",
-          "undo": ""
+          "undo": "/home/moe/.config/sway-sunshine/restore-default-sink.sh"
         },
         {
           "do": "/home/YOUR_USER/.config/sway-sunshine/set-resolution.sh",
@@ -61,7 +75,7 @@
       "prep-cmd": [
         {
           "do": "/home/YOUR_USER/.config/sway-sunshine/restore-default-sink.sh",
-          "undo": ""
+          "undo": "/home/moe/.config/sway-sunshine/restore-default-sink.sh"
         },
         {
           "do": "/home/YOUR_USER/.config/sway-sunshine/set-resolution.sh",
@@ -78,7 +92,7 @@
       "prep-cmd": [
         {
           "do": "/home/YOUR_USER/.config/sway-sunshine/restore-default-sink.sh",
-          "undo": ""
+          "undo": "/home/moe/.config/sway-sunshine/restore-default-sink.sh"
         },
         {
           "do": "/home/YOUR_USER/.config/sway-sunshine/set-resolution.sh",
