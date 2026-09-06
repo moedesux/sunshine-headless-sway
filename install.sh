@@ -53,14 +53,14 @@ detect_de() {
     local de="${XDG_CURRENT_DESKTOP:-}"
     de="${de,,}"  # lowercase
 
-    if [[ "$de" == *"gnome"* ]] || [[ "$de" == *"unity"* ]] || [[ "$de" == *"budgie"* ]]; then
+    if [[ "$de" == *"hyprland"* ]] || [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+        echo "hyprland"
+    elif [[ "$de" == *"gnome"* ]] || [[ "$de" == *"unity"* ]] || [[ "$de" == *"budgie"* ]]; then
         echo "gnome"
-    elif [[ "$de" == *"kde"* ]] || [[ "$de" == *"plasma"* ]]; then
-        echo "kde"
+    elif command -v Hyprland &>/dev/null || command -v hyprctl &>/dev/null; then
+        echo "hyprland"
     elif command -v mutter &>/dev/null; then
         echo "gnome"
-    elif command -v kwin_wayland &>/dev/null || command -v kwin_x11 &>/dev/null; then
-        echo "kde"
     else
         echo "unknown"
     fi
@@ -69,26 +69,27 @@ detect_de() {
 DETECTED_DE=$(detect_de)
 
 echo ""
-if [ "$DETECTED_DE" = "gnome" ]; then
+if [ "$DETECTED_DE" = "hyprland" ]; then
+    echo "Detected desktop environment: Hyprland"
+    echo "  → No udev input-isolation rule needed — Sunshine virtual devices are"
+    echo "    disabled on the host at runtime via hyprctl (device[...]:enabled)"
+elif [ "$DETECTED_DE" = "gnome" ]; then
     echo "Detected desktop environment: GNOME"
     echo "  → Will use mutter-device-ignore for input isolation"
-elif [ "$DETECTED_DE" = "kde" ]; then
-    echo "Detected desktop environment: KDE Plasma"
-    echo "  → Will strip ID_INPUT tags for input isolation"
 else
     echo "Could not auto-detect desktop environment."
     echo ""
     echo "Input isolation method depends on your desktop:"
-    echo "  1) GNOME  — uses mutter-device-ignore (targeted, GNOME-only)"
-    echo "  2) KDE    — strips ID_INPUT tags (works with KWin and other compositors)"
+    echo "  1) Hyprland — disables Sunshine devices at runtime via hyprctl (no udev rule)"
+    echo "  2) GNOME    — uses mutter-device-ignore (targeted, GNOME-only)"
     echo ""
     read -rp "Select your desktop [1/2]: " DE_CHOICE
     case "$DE_CHOICE" in
-        1) DETECTED_DE="gnome" ;;
-        2) DETECTED_DE="kde" ;;
+        1) DETECTED_DE="hyprland" ;;
+        2) DETECTED_DE="gnome" ;;
         *)
-            echo "Invalid choice. Defaulting to GNOME method (safer — targets Mutter specifically, doesn't break libinput)."
-            DETECTED_DE="gnome"
+            echo "Invalid choice. Defaulting to Hyprland method (no udev changes)."
+            DETECTED_DE="hyprland"
             ;;
     esac
 fi
@@ -447,20 +448,20 @@ echo "Installed PipeWire persistent audio sink"
 
 # udev rule: install DE-appropriate input isolation rule
 # NOTE: This requires sudo. Running it manually ensures you control the action.
-UDEV_RULE="85-sunshine-input-isolation.rules"
+# Hyprland needs no udev rule — Sunshine virtual devices are disabled on the
+# host at runtime via hyprctl (see LutrisToSunshine input isolation helper).
 if [ "$DETECTED_DE" = "gnome" ]; then
+    UDEV_RULE="85-sunshine-input-isolation.rules"
     UDEV_SRC="$SCRIPT_DIR/udev/85-sunshine-input-isolation-gnome.rules"
     echo "Installed GNOME input isolation rule (mutter-device-ignore)"
+    echo ""
+    echo "To install the udev rule (requires sudo):"
+    echo "  sudo cp \"$UDEV_SRC\" \"/etc/udev/rules.d/$UDEV_RULE\""
+    echo "  sudo udevadm control --reload-rules"
+    echo ""
 else
-    UDEV_SRC="$SCRIPT_DIR/udev/85-sunshine-input-isolation-kde.rules"
-    echo "Installed KDE input isolation rule (ID_INPUT stripping)"
+    echo "Hyprland detected — skipping udev input isolation rule (not needed)."
 fi
-
-echo ""
-echo "To install the udev rule (requires sudo):"
-echo "  sudo cp \"$UDEV_SRC\" \"/etc/udev/rules.d/$UDEV_RULE\""
-echo "  sudo udevadm control --reload-rules"
-echo ""
 
 echo "Installed systemd services"
 
@@ -478,7 +479,7 @@ sleep 1
 
 echo "=== Installation complete ==="
 echo ""
-echo "Desktop environment: $([ "$DETECTED_DE" = "gnome" ] && echo "GNOME" || echo "KDE/Other")"
+echo "Desktop environment: $([ "$DETECTED_DE" = "gnome" ] && echo "GNOME" || echo "Hyprland")"
 echo "Wayland display: $HEADLESS_DISPLAY"
 echo ""
 echo "To start streaming now:"

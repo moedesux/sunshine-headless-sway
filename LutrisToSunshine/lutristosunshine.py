@@ -387,25 +387,25 @@ def handle_display_command(args) -> int:
         print(_format_kv("Runtime:", ", ".join(runtime_parts)))
         isolation_level = "success"
         isolation_detail = "rule ready"
-        if snapshot["input_isolation_mode"] == "kwin-runtime-disable":
-            if snapshot["kwin_isolation_error"]:
+        if snapshot["input_isolation_mode"] == "hyprctl-runtime-disable":
+            if snapshot["input_isolation_error"]:
                 isolation_level = "error"
-                isolation_detail = snapshot["kwin_isolation_error"]
-            elif snapshot["kwin_isolation_state"] == "inactive":
+                isolation_detail = snapshot["input_isolation_error"]
+            elif snapshot["input_isolation_state"] == "inactive":
                 isolation_level = "warning"
-                isolation_detail = "KWin helper is not running"
-            elif snapshot["kwin_isolation_state"] == "starting":
+                isolation_detail = "hyprctl helper is not running"
+            elif snapshot["input_isolation_state"] == "starting":
                 isolation_level = "info"
-                isolation_detail = "KWin helper is starting"
-            elif snapshot["kwin_isolation_devices"]:
+                isolation_detail = "hyprctl helper is starting"
+            elif snapshot["input_isolation_devices"]:
                 isolation_detail = (
-                    f"disabled {len(snapshot['kwin_isolation_devices'])} of "
-                    f"{snapshot['sunshine_input_device_count']} Sunshine device(s) in KWin"
+                    f"disabled {len(snapshot['input_isolation_devices'])} of "
+                    f"{snapshot['sunshine_input_device_count']} Sunshine device(s) in Hyprland"
                 )
             elif snapshot["sunshine_input_device_count"] > 0:
                 isolation_level = "warning"
                 isolation_detail = (
-                    f"matched {snapshot['kwin_isolation_seen_device_count']} of "
+                    f"matched {snapshot['input_isolation_seen_device_count']} of "
                     f"{snapshot['sunshine_input_device_count']} Sunshine device(s), but disabled 0"
                 )
             else:

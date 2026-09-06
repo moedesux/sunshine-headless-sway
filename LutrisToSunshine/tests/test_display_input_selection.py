@@ -161,59 +161,52 @@ class DisplayInputSelectionTests(unittest.TestCase):
         self.assertIn('GROUP="streaming"', rule)
         self.assertIn('MODE="0660"', rule)
 
-    def test_udev_rule_preserves_input_classification_outside_plasma(self) -> None:
+    def test_udev_rule_preserves_input_classification_outside_hyprland(self) -> None:
         rule = manager._udev_rule("permissions-only")
         self.assertNotIn('ENV{ID_INPUT}=""', rule)
         self.assertNotIn('ENV{ID_INPUT_KEYBOARD}=""', rule)
         self.assertNotIn('ENV{ID_INPUT_MOUSE}=""', rule)
         self.assertNotIn('ENV{ID_INPUT_TOUCHPAD}=""', rule)
 
-    def test_udev_rule_preserves_input_classification_on_plasma(self) -> None:
-        rule = manager._udev_rule("kwin-runtime-disable")
+    def test_udev_rule_preserves_input_classification_on_hyprland(self) -> None:
+        rule = manager._udev_rule("hyprctl-runtime-disable")
         self.assertNotIn('ENV{ID_INPUT}=""', rule)
         self.assertNotIn('ENV{ID_INPUT_KEYBOARD}=""', rule)
         self.assertNotIn('ENV{ID_INPUT_MOUSE}=""', rule)
         self.assertNotIn('ENV{ID_INPUT_TOUCHPAD}=""', rule)
 
-    def test_input_isolation_mode_detects_plasma(self) -> None:
+    def test_input_isolation_mode_detects_hyprland(self) -> None:
         with patch.dict(
             manager.os.environ,
             {
-                "XDG_CURRENT_DESKTOP": "KDE",
-                "XDG_SESSION_DESKTOP": "KDE",
-                "DESKTOP_SESSION": "plasma",
-                "KDE_FULL_SESSION": "true",
+                "XDG_CURRENT_DESKTOP": "Hyprland",
+                "XDG_SESSION_DESKTOP": "Hyprland",
+                "DESKTOP_SESSION": "hyprland",
+                "HYPRLAND_INSTANCE_SIGNATURE": "deadbeef_1_2",
             },
             clear=False,
         ):
-            self.assertEqual(manager._input_isolation_mode(), "kwin-runtime-disable")
+            self.assertEqual(manager._input_isolation_mode(), "hyprctl-runtime-disable")
 
-    def test_kwin_input_isolation_status_defaults_when_missing(self) -> None:
+    def test_input_isolation_status_defaults_when_missing(self) -> None:
         state = manager._default_state()
         state["paths"] = dict(state["paths"])
-        state["paths"]["kwin_input_isolation_status_file"] = str(Path(tempfile.mkdtemp()) / "missing-status.json")
-        status = manager._kwin_input_isolation_status(state)
+        state["paths"]["input_isolation_status_file"] = str(Path(tempfile.mkdtemp()) / "missing-status.json")
+        status = manager._input_isolation_status(state)
         self.assertEqual(status["state"], "inactive")
         self.assertEqual(status["disabled_devices"], [])
         self.assertEqual(status["failed_devices"], [])
         self.assertEqual(status["last_error"], "")
 
-    def test_kwin_input_isolation_script_bakes_host_session_family(self) -> None:
-        with patch.dict(
-            manager.os.environ,
-            {
-                "XDG_CURRENT_DESKTOP": "KDE",
-                "DESKTOP_SESSION": "plasma",
-                "KDE_FULL_SESSION": "true",
-            },
-            clear=False,
-        ):
-            script = manager._kwin_input_isolation_script(manager._default_state())
-        self.assertIn("HOST_SESSION_FAMILY = 'plasma'", script)
+    def test_input_isolation_script_uses_hyprctl(self) -> None:
+        script = manager._input_isolation_script(manager._default_state())
         self.assertIn('write_status(state="starting")', script)
-        self.assertIn('DEVICE_INTERFACE,\n        "enabled",', script)
-        self.assertIn('return f"{value:04x}"', script)
+        self.assertIn("def is_hyprland_session():", script)
+        self.assertIn('["hyprctl", *args]', script)
+        self.assertIn('run_hyprctl("-j", "devices")', script)
+        self.assertIn('run_hyprctl("keyword", f"device[{name}]:enabled", value)', script)
         self.assertIn('replace("_", " ")', script)
+        self.assertIn('service="hyprctl"', script)
 
     def test_sunshine_unit_falls_back_to_legacy_name_when_preferred_unit_missing(self) -> None:
         original_systemctl_user = manager._systemctl_user
@@ -473,26 +466,26 @@ H: Handlers=sysrq kbd event29
         state["paths"]["sunshine_override_dir"] = str(override_dir)
         state["paths"]["sunshine_override"] = str(override_dir / "override.conf")
         state["paths"]["input_bridge_script"] = str(base / "lutristosunshine-input-bridge.py")
-        state["paths"]["kwin_input_isolation_script"] = str(base / "lutristosunshine-kwin-input-isolation.py")
+        state["paths"]["input_isolation_script"] = str(base / "lutristosunshine-input-isolation.py")
         state["paths"]["audio_guard_script"] = str(base / "lutristosunshine-guard-audio-defaults.sh")
         state["paths"]["sunshine_wrapper_script"] = str(base / "lutristosunshine-run-display-service.sh")
         state["paths"]["portal_active_file"] = str(base / "portal-active")
         state["paths"]["portal_lock_file"] = str(base / "portal-lock")
         state["paths"]["input_bridge_status_file"] = str(base / "input-bridge-status.json")
-        state["paths"]["kwin_input_isolation_status_file"] = str(base / "kwin-input-isolation-status.json")
+        state["paths"]["input_isolation_status_file"] = str(base / "input-isolation-status.json")
         state["paths"]["wayland_display_file"] = str(base / "wayland-display")
         state["paths"]["audio_module_file"] = str(base / "audio-module-id")
 
         for key in [
             "sunshine_override",
             "input_bridge_script",
-            "kwin_input_isolation_script",
+            "input_isolation_script",
             "audio_guard_script",
             "sunshine_wrapper_script",
             "portal_active_file",
             "portal_lock_file",
             "input_bridge_status_file",
-            "kwin_input_isolation_status_file",
+            "input_isolation_status_file",
             "wayland_display_file",
             "audio_module_file",
         ]:
@@ -668,19 +661,19 @@ H: Handlers=sysrq kbd event29
         self.assertEqual(report["summary"], "needs_attention")
         self.assertTrue(any(check["status"] == "fail" for check in report["checks"]))
 
-    def test_display_doctor_report_reports_kwin_runtime_state(self) -> None:
+    def test_display_doctor_report_reports_input_isolation_runtime_state(self) -> None:
         tempdir = tempfile.TemporaryDirectory()
         self.addCleanup(tempdir.cleanup)
         base = Path(tempdir.name)
         rule_path = base / "85-lutristosunshine-sunshine-input.rules"
         rule_path.write_text(manager._udev_rule("permissions-only"), encoding="utf-8")
-        kwin_status_path = base / "kwin-input-isolation-status.json"
-        kwin_status_path.write_text(
+        isolation_status_path = base / "input-isolation-status.json"
+        isolation_status_path.write_text(
             json.dumps(
                 {
                     "state": "active",
-                    "service": "org.kde.KWin",
-                    "disabled_devices": [{"path": "/org/kde/KWin/InputDevice/event30", "name": "Keyboard_passthrough"}],
+                    "service": "hyprctl",
+                    "disabled_devices": [{"path": "keyboard-passthrough", "name": "keyboard-passthrough"}],
                     "seen_device_count": 1,
                     "last_error": "",
                 }
@@ -692,7 +685,7 @@ H: Handlers=sysrq kbd event29
         state["enabled"] = True
         state["udev_rule_path"] = str(rule_path)
         state["paths"] = dict(state["paths"])
-        state["paths"]["kwin_input_isolation_status_file"] = str(kwin_status_path)
+        state["paths"]["input_isolation_status_file"] = str(isolation_status_path)
 
         original_load_state = manager.load_state
         original_ensure_dependencies = manager._ensure_dependencies
@@ -708,10 +701,10 @@ H: Handlers=sysrq kbd event29
             with patch.dict(
                 manager.os.environ,
                 {
-                    "XDG_CURRENT_DESKTOP": "KDE",
-                    "XDG_SESSION_DESKTOP": "KDE",
-                    "DESKTOP_SESSION": "plasma",
-                    "KDE_FULL_SESSION": "true",
+                    "XDG_CURRENT_DESKTOP": "Hyprland",
+                    "XDG_SESSION_DESKTOP": "Hyprland",
+                    "DESKTOP_SESSION": "hyprland",
+                    "HYPRLAND_INSTANCE_SIGNATURE": "deadbeef_1_2",
                 },
                 clear=False,
             ):
@@ -724,22 +717,22 @@ H: Handlers=sysrq kbd event29
             manager._sunshine_virtual_input_devices = original_sunshine_virtual_input_devices
 
         self.assertEqual(report["summary"], "degraded")
-        kwin_check = next(check for check in report["checks"] if check["label"] == "KWin isolation")
-        self.assertEqual(kwin_check["status"], "pass")
-        self.assertIn("disabled 1 of 1 Sunshine input device", kwin_check["message"])
+        isolation_check = next(check for check in report["checks"] if check["label"] == "Input isolation")
+        self.assertEqual(isolation_check["status"], "pass")
+        self.assertIn("disabled 1 of 1 Sunshine input device", isolation_check["message"])
 
-    def test_display_doctor_report_warns_when_host_has_sunshine_inputs_but_kwin_disabled_zero(self) -> None:
+    def test_display_doctor_report_warns_when_host_has_sunshine_inputs_but_isolation_disabled_zero(self) -> None:
         tempdir = tempfile.TemporaryDirectory()
         self.addCleanup(tempdir.cleanup)
         base = Path(tempdir.name)
         rule_path = base / "85-lutristosunshine-sunshine-input.rules"
         rule_path.write_text(manager._udev_rule("permissions-only"), encoding="utf-8")
-        kwin_status_path = base / "kwin-input-isolation-status.json"
-        kwin_status_path.write_text(
+        isolation_status_path = base / "input-isolation-status.json"
+        isolation_status_path.write_text(
             json.dumps(
                 {
                     "state": "active",
-                    "service": "org.kde.KWin",
+                    "service": "hyprctl",
                     "disabled_devices": [],
                     "failed_devices": [],
                     "seen_device_count": 5,
@@ -753,7 +746,7 @@ H: Handlers=sysrq kbd event29
         state["enabled"] = True
         state["udev_rule_path"] = str(rule_path)
         state["paths"] = dict(state["paths"])
-        state["paths"]["kwin_input_isolation_status_file"] = str(kwin_status_path)
+        state["paths"]["input_isolation_status_file"] = str(isolation_status_path)
 
         original_load_state = manager.load_state
         original_ensure_dependencies = manager._ensure_dependencies
@@ -775,10 +768,10 @@ H: Handlers=sysrq kbd event29
             with patch.dict(
                 manager.os.environ,
                 {
-                    "XDG_CURRENT_DESKTOP": "KDE",
-                    "XDG_SESSION_DESKTOP": "KDE",
-                    "DESKTOP_SESSION": "plasma",
-                    "KDE_FULL_SESSION": "true",
+                    "XDG_CURRENT_DESKTOP": "Hyprland",
+                    "XDG_SESSION_DESKTOP": "Hyprland",
+                    "DESKTOP_SESSION": "hyprland",
+                    "HYPRLAND_INSTANCE_SIGNATURE": "deadbeef_1_2",
                 },
                 clear=False,
             ):
@@ -790,9 +783,9 @@ H: Handlers=sysrq kbd event29
             manager._bridge_service_state = original_bridge_service_state
             manager._sunshine_virtual_input_devices = original_sunshine_virtual_input_devices
 
-        kwin_check = next(check for check in report["checks"] if check["label"] == "KWin isolation")
-        self.assertEqual(kwin_check["status"], "warn")
-        self.assertIn("matched 5 of 5 host Sunshine input device(s), but disabled 0", kwin_check["message"])
+        isolation_check = next(check for check in report["checks"] if check["label"] == "Input isolation")
+        self.assertEqual(isolation_check["status"], "warn")
+        self.assertIn("matched 5 of 5 host Sunshine input device(s), but disabled 0", isolation_check["message"])
 
     def test_managed_sunshine_templates_do_not_force_global_pulse_sink(self) -> None:
         state = manager._default_state()

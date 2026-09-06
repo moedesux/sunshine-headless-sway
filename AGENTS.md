@@ -39,6 +39,8 @@ This process consumes significant VRAM (~28 GB) on the NVIDIA RTX 5090, which ma
 
 ## Project Overview
 
+> **Branch note (`hyprland`):** This branch targets a Hyprland host. All KDE/KWin dependencies have been removed: install.sh detects Hyprland (no udev rule needed), the KWin env vars were dropped from `sunshine-headless.service`, and LutrisToSunshine's input isolation helper now disables Sunshine's virtual devices on the host via `hyprctl keyword "device[...]:enabled" false` instead of the KWin DBus `org.kde.KWin.InputDevice` interface. Sections below mentioning KDE/KWin/Plasma are historical context from the `master` (KDE) branch.
+
 This repo manages a **headless Sway + Sunshine game streaming** setup. A separate headless Wayland session (Sway) runs dedicated to game streaming, fully isolated from the main desktop. Sunshine captures the headless session and streams via Moonlight.
 
 Key services:
@@ -250,8 +252,8 @@ The install script:
 - Checks for a stale sway-sunshine session via PID file (`/run/user/$USER_ID/sway-sunshine.pid`), sends SIGINT with 10s grace period, falls back to SIGKILL if needed
 - Overwrites sunshine.conf from template on each run
 - Preserves existing apps.json if it already exists, running auto-migration (prep-cmd updates, duplicate cleanup)
-- Auto-detects DE for udev rule (GNOME vs KDE input isolation)
-- Installs DE-appropriate udev rule to `/etc/udev/rules.d/85-sunshine-input-isolation.rules` (GNOME rule is active; KDE variant is comment-only — input isolation is handled by Sway config)
+- Auto-detects DE for input isolation (Hyprland: no udev rule, uses hyprctl runtime disable; GNOME: mutter-device-ignore udev rule)
+- Installs DE-appropriate udev rule to `/etc/udev/rules.d/85-sunshine-input-isolation.rules` (GNOME only; skipped entirely on Hyprland — input isolation is handled by the Sway config plus the hyprctl runtime helper in LutrisToSunshine)
 - Auto-detects Wayland display number for the headless session (finds latest `wayland-*` socket and increments)
 - Templates `WAYLAND_DISPLAY` into both `sway-sunshine.service` and `sunshine-headless.service`
 - Replaces `ExecStart` in `sunshine-headless.service` with the detected Sunshine path (preserves `sg input -c` wrapper)

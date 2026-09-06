@@ -302,9 +302,11 @@ That reconciles the Sunshine app list and rewrites `headless:` prep commands to 
 
 ## Troubleshooting
 
-### Input isolation not working on KDE Plasma
+### Input isolation not working on Hyprland
 
-If you are on KDE Plasma and input isolation is not working (e.g., keyboard or mouse events leak between the virtual display and the host desktop), try adding your user to the `input` group:
+On Hyprland, input isolation is handled at runtime: a helper polls `hyprctl -j devices` and disables Sunshine's virtual passthrough devices on the host with `hyprctl keyword "device[<name>]:enabled" false` for the duration of the streaming session, re-enabling them on stop.
+
+If input still leaks between the virtual display and the host desktop (e.g., the helper reports `failed` or is not running), try adding your user to the `input` group:
 
 ```bash
 sudo usermod -aG input $USER

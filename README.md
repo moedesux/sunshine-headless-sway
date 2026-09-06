@@ -6,7 +6,7 @@
 
 Stream games from a headless Sway session using [Sunshine](https://github.com/LizardByte/Sunshine) and [Moonlight](https://moonlight-stream.org/), without disrupting your main desktop session.
 
-This setup runs a separate headless Wayland compositor (Sway) dedicated to game streaming. Your primary desktop (GNOME, KDE, etc.) continues running normally — audio, display, and input are fully isolated.
+This setup runs a separate headless Wayland compositor (Sway) dedicated to game streaming. Your primary desktop (Hyprland, GNOME, etc.) continues running normally — audio, display, and input are fully isolated.
 
 ## Why headless?
 
@@ -34,7 +34,7 @@ cd sunshine-headless-sway
 
 The install script will:
 - Install missing dependencies (`sway`, `swaybg`, `xdg-desktop-portal-wlr`) via pacman or apt
-- Auto-detect your desktop environment (GNOME or KDE) for input isolation
+- Auto-detect your desktop environment (Hyprland or GNOME) for input isolation
 - Auto-detect your Sunshine installation path
 - Detect the correct Wayland display number and user ID
 - Template all config files with your system's paths
@@ -49,7 +49,7 @@ If you prefer to install manually, see the [manual setup guide](#manual-setup-gu
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  Main Desktop (GNOME/KDE)          wayland-0        │
+│  Main Desktop (Hyprland/GNOME)     wayland-0        │
 │  └─ Normal apps, browser, etc.                      │
 │  └─ Audio → your speakers/headphones                │
 ├─────────────────────────────────────────────────────┤
@@ -189,34 +189,30 @@ Uses the `mutter-device-ignore` property — a targeted GNOME-specific mechanism
 ACTION=="add|change", SUBSYSTEM=="input", ATTRS{id/vendor}=="beef", ATTRS{id/product}=="dead", ENV{mutter-device-ignore}="1"
 ```
 
-#### KDE (KWin)
+#### Hyprland
 
-KWin has no equivalent to `mutter-device-ignore`. Instead, the udev rule strips `ID_INPUT` tags so KWin never discovers the devices as inputs:
+Hyprland needs no udev rule. Sunshine's virtual devices are disabled on the host at runtime via `hyprctl` while the stream stack is up, and re-enabled when it stops:
 
-```udev
-ACTION=="add|change", SUBSYSTEM=="input", ATTRS{id/vendor}=="beef", ATTRS{id/product}=="dead", ENV{ID_INPUT}="", ENV{ID_INPUT_KEYBOARD}="", ENV{ID_INPUT_MOUSE}="", ENV{ID_INPUT_TOUCHPAD}=""
+```bash
+hyprctl keyword "device[keyboard-passthrough]:enabled" false
 ```
 
-> **Note**: The KDE method also works for GNOME and other compositors, but is more aggressive — it hides the devices from *all* desktop tools (e.g., Settings panels). The `mutter-device-ignore` method is preferred for GNOME since it's more targeted.
+Device names come from `hyprctl devices` (e.g. `keyboard-passthrough`, `mouse-passthrough`, `mouse-passthrough-(absolute)`). The bundled LutrisToSunshine display manager runs a small helper that polls `hyprctl -j devices`, matches Sunshine's passthrough devices by name, and keeps them disabled on the host for the duration of the streaming session.
 
 #### How isolation works
 
-- The **udev rule** prevents the host compositor from claiming Sunshine's virtual inputs (method varies by DE, see above)
+- On GNOME, a **udev rule** prevents the host compositor from claiming Sunshine's virtual inputs; on **Hyprland** this is handled at runtime via `hyprctl` (see above)
 - The headless Sway uses `WLR_BACKENDS=headless,libinput` with `LIBSEAT_BACKEND=noop` and runs under the `input` group via `sg` to access input devices without a logind seat
 - The **Sway config** disables all physical host devices and only enables Sunshine's passthrough devices, so your physical keyboard and mouse don't leak into the streaming session
-- **KDE Plasma workaround**: `KWIN_DRM_NO_DIRECT_SCANOUT=1` and `KWIN_FORCE_SW_CURSOR=1` are set in `sunshine-headless.service` to prevent KWin from interfering with the headless session
 - Gamepads are read directly by Steam via evdev, bypassing the compositor entirely
 
 #### Switching DE method manually
 
-If you switch desktop environments, reinstall the appropriate rule:
+Hyprland needs no udev rule. If you switch to GNOME, install its rule:
 
 ```bash
 # For GNOME
 sudo cp udev/85-sunshine-input-isolation-gnome.rules /etc/udev/rules.d/85-sunshine-input-isolation.rules
-
-# For KDE
-sudo cp udev/85-sunshine-input-isolation-kde.rules /etc/udev/rules.d/85-sunshine-input-isolation.rules
 
 # Reload
 sudo udevadm control --reload-rules
@@ -313,7 +309,7 @@ Open Moonlight, find your host, and pair using the PIN at `https://YOUR_HOST:479
 
 ```
 /etc/udev/rules.d/
-└── 85-sunshine-input-isolation.rules  # Installed by install.sh (GNOME or KDE variant)
+└── 85-sunshine-input-isolation.rules  # GNOME only — Hyprland uses hyprctl instead
 
 sunshine-headless-sway/
 ├── install.sh                  # One-command setup script
