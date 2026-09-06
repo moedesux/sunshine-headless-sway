@@ -1,6 +1,10 @@
 # Headless Sway session for Sunshine streaming
 # No physical display needed - uses WLR_BACKENDS=headless
 
+# Re-publish the authoritative WAYLAND_DISPLAY once Sway has bound its real
+# socket (the wrapper's pre-exec value can be stale after a contested bind).
+exec $HOME/.config/sway-sunshine/publish-display.sh
+
 # Disable all physical outputs - only HEADLESS-1 should be visible
 output * disable
 

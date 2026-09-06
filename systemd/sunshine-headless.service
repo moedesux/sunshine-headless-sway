@@ -5,7 +5,7 @@ Requires=sway-sunshine.service
 
 [Service]
 Type=simple
-Environment=WAYLAND_DISPLAY=wayland-1
+EnvironmentFile=-/run/user/%U/sway-sunshine-display
 Environment=SWAYSOCK=/run/user/1000/sway-sunshine.sock
 Environment=XDG_SESSION_TYPE=wayland
 Environment=XDG_CURRENT_DESKTOP=sway
@@ -13,7 +13,7 @@ Environment=__GL_GSYNC_ALLOWED=0
 Environment=__NV_PRIME_RENDER_OFFLOAD=1
 Environment=__VK_LAYER_NV_optimus=NVIDIA_only
 UnsetEnvironment=__EGL_VENDOR_LIBRARY_FILENAMES
-ExecStartPre=/bin/sleep 2
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do [ -n "$(find /run/user/1000/sway-sunshine-display -newer /run/user/1000/sway-sunshine.pid -print 2>/dev/null)" ] && exit 0; sleep 0.5; done; exit 0'
 ExecStart=/usr/bin/sg input -c /usr/bin/sunshine
 Restart=on-failure
 RestartSec=5

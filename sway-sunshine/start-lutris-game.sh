@@ -6,16 +6,29 @@
 # Migrates Lutris from the main desktop if it's running there
 
 GAME_ID="$1"
-WAYLAND_DISPLAY="wayland-1"
+# Resolve the headless session's Wayland display at runtime (the main desktop
+# may occupy wayland-0, wayland-1, or higher depending on DE/uwsm/SDDM).
+WAYLAND_DISPLAY=$(sed -n 's/^WAYLAND_DISPLAY=//p' /run/user/$(id -u)/sway-sunshine-display 2>/dev/null)
+WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}"
+LOG_FILE="$HOME/.config/sway-sunshine/start-lutris-game.log"
+
+# Verify the published display is actually live; fall back to scanning live sockets
+if command -v wayland-info >/dev/null 2>&1 && ! WAYLAND_DISPLAY="$WAYLAND_DISPLAY" wayland-info >/dev/null 2>&1; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') WARNING: published display $WAYLAND_DISPLAY not live, scanning /run/user/$(id -u)" | tee -a "$LOG_FILE"
+    for cand in $(ls /run/user/$(id -u)/ 2>/dev/null | grep -E '^wayland-[0-9]+$'); do
+        if WAYLAND_DISPLAY="$cand" wayland-info >/dev/null 2>&1; then
+            WAYLAND_DISPLAY="$cand"
+            echo "$(date '+%Y-%m-%d %H:%M:%S') using live display $WAYLAND_DISPLAY" | tee -a "$LOG_FILE"
+            break
+        fi
+    done
+fi
 
 # Sway IPC socket for the headless session
 SWAYSOCK="/run/user/$(id -u)/sway-sunshine.sock"
 
 export WAYLAND_DISPLAY
 export SWAYSOCK
-
-
-LOG_FILE="$HOME/.config/sway-sunshine/start-lutris-game.log"
 echo "[$(date)] Environment: WAYLAND_DISPLAY=$WAYLAND_DISPLAY, SWAYSOCK=$SWAYSOCK" >> "$LOG_FILE"
 
 

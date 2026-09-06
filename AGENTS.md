@@ -76,24 +76,62 @@ journalctl --user -u sunshine-headless.service -n 30 --no-pager | grep -iE "enco
 
 ## Wayland Display Layout
 
-**Standard display numbering:**
-- `wayland-0` = main desktop (physical monitor)
-- `wayland-1` = headless Sway session (Sunshine streaming target)
+**Display numbering is no longer fixed.** The main desktop may occupy `wayland-0`, `wayland-1`, or higher depending on the DE / uwsm / SDDM. For example, on KDE the main desktop is usually `wayland-0`; after omarchy 4.0 the main desktop Hyprland moved to `wayland-1`, pushing the headless Sway session to `wayland-2`. The headless session now takes the **next free number** automatically at runtime, so it can no longer be assumed to be `wayland-1`.
 
-**On most setups, the headless session uses `wayland-1`.** However, on KDE/CachyOS or other setups where SDDM or other components create additional Wayland sockets, the headless session may get `wayland-2` or higher. Always verify:
+**Runtime detection mechanism (replaces hardcoding):**
+- `sway-sunshine/sway-wrapper.sh` — at startup, scans `/run/user/$(id -u)/wayland-*` sockets (skipping `*.lock`), finds the highest numeric display, takes the next free number (`wayland-$((NEXT + 1))`), exports `WAYLAND_DISPLAY` for the sway process, and records it to `/run/user/$(id -u)/sway-sunshine-display` in `KEY=VALUE` format (for systemd `EnvironmentFile`).
+- `systemd/sunshine-headless.service` — reads that file via `EnvironmentFile=-/run/user/%U/sway-sunshine-display`. The `-` prefix makes it optional; the service file carries no display env var of its own, so the recorded value is the only one.
+- `sway-sunshine/start-steam-game.sh`, `start-lutris-game.sh`, `start-heroic-game.sh` — resolve `WAYLAND_DISPLAY` at runtime by reading the display file (`sed -n 's/^WAYLAND_DISPLAY=//p' /run/user/$(id -u)/sway-sunshine-display`), falling back to `wayland-1` if the file is missing.
 
-```bash
-ls /run/user/$(id -u)/wayland-*
-```
-
-**Important for install.sh:** Both service files (`sway-sunshine.service` and `sunshine-headless.service`) hardcode `WAYLAND_DISPLAY=wayland-1`. The `start-steam-game.sh` script also hardcodes `WAYLAND_DISPLAY="wayland-1"`. If your headless session uses a different display number, update these files accordingly.
+**Source of truth:** the display file `/run/user/$(id -u)/sway-sunshine-display` records which display the headless session actually took. Always verify it — it is the only place the live display is recorded (the installed service files carry no display value of their own).
 
 **Verification:** After any install or restart, always confirm:
 ```bash
 ls /run/user/$(id -u)/wayland-*
-grep WAYLAND_DISPLAY ~/.config/systemd/user/sway-sunshine.service
-grep WAYLAND_DISPLAY ~/.config/systemd/user/sunshine-headless.service
+cat /run/user/$(id -u)/sway-sunshine-display
+grep WAYLAND_DISPLAY ~/.config/systemd/user/sway-sunshine.service ~/.config/systemd/user/sunshine-headless.service  # expect no output — display is file-driven
 ```
+
+## Display Re-Publish Mechanism (same-second restart staleness fix)
+
+**Problem:** `sway-wrapper.sh` writes the display file *before* exec'ing Sway, based on the socket it predicted would be free. In a same-second restart race — where Sway restarts while the old socket is still being contested — wlroots can renumber and bind a *different* socket than the wrapper predicted, leaving `sway-sunshine-display` pointing at a socket Sway never opened. Consumers reading the stale file (Sunshine via `EnvironmentFile`, the launcher scripts) then target a dead display.
+
+**Fix:** Sway itself re-publishes the authoritative value *after* it has bound its real socket:
+
+- `sway-sunshine/config` now begins with `exec $HOME/.config/sway-sunshine/publish-display.sh`, making the re-publisher a direct child of the running Sway process.
+- `sway-sunshine/publish-display.sh` (installed by install.sh with a plain `cp` + `chmod +x`; it uses `$(id -u)` and needs no templating):
+  - reads Sway's real `WAYLAND_DISPLAY` from the parent's `/proc/$PPID/environ` (a direct child can read its parent's environ even under Yama `ptrace_scope=1` — verified on this host), falling back to the value it inherited from Sway at fork time (the same value either way);
+  - publishes only a well-formed `WAYLAND_DISPLAY=wayland-*` value — fail-safe by design: an unparseable value leaves the file untouched rather than clobbering a good one, and the script never aborts compositor startup;
+  - rewrites `/run/user/$(id -u)/sway-sunshine-display`.
+- `systemd/sunshine-headless.service` gates startup on the re-publish: its `ExecStartPre` polls (0.5 s ticks, 30 ticks / up to 15 s) until the display file is newer than `sway-sunshine.pid` (i.e. Sway has both restarted *and* re-published since its current PID was written), then always exits 0 so a missing helper can never wedge the unit.
+- The launcher scripts (`start-steam-game.sh`, `start-lutris-game.sh`, `start-heroic-game.sh`) additionally liveness-check the published display with `wayland-info` before use; if the published socket is dead they scan `/run/user/$(id -u)/` for a live `wayland-[0-9]+` socket and log the fallback to their `LOG_FILE`.
+
+**Ordering guarantee:** the display file is now written by a live Sway child after the bind (overwriting the wrapper's pre-exec best guess), and Sunshine's `ExecStartPre` guarantees the file has been re-published before its process starts.
+
+**Known limitation (accepted):** systemd reads `EnvironmentFile=` at unit activation, BEFORE `ExecStartPre` runs. In a contested start, the main Sunshine process can therefore still see the wrapper's pre-computed value in its environment even though the file is already fixed by the time the process starts. Mitigations: the paced install flow avoids the contention; on-demand consumers (the launcher scripts) always read the corrected file at runtime; and the situation self-heals on the next restart.
+
+## omarchy 3.8.4 → 4.0 Regression: Main Desktop Captured Instead of Headless Sway
+
+**Symptom:** After upgrading omarchy from 3.8.4 to 4.0, launching Steam Big Picture via Moonlight crashed the main desktop. Hyprland died with `SIGABRT` / an assertion in `CHyprOpenGLImpl::begin()`, with `EGL createImageFromDmaBufs` failing (`EGL_BAD_MATCH`), and the SDDM session died (requiring an SDDM restart).
+
+**Root cause:** The display numbering shifted. In omarchy 3.8.4 the main desktop Hyprland occupied `wayland-0`; in omarchy 4.0 (launched through uwsm) it moved to `wayland-1`, pushing the headless Sway session to `wayland-2`. But the systemd service files and game launcher scripts hardcoded `WAYLAND_DISPLAY=wayland-1`, so Sunshine connected to and captured the **main desktop Hyprland** instead of the headless Sway session. When Steam Big Picture ran `loginctl unlock-session`, it triggered a re-render on Hyprland; because Hyprland runs Mesa-only EGL via uwsm on this dual NVIDIA + AMD host, the cross-GPU DMA-BUF import failed (`EGL createImageFromDmaBufs` → `EGL_BAD_MATCH`) and the assertion in `CHyprOpenGLImpl::begin()` aborted Hyprland.
+
+**The fix:** Display targeting is now **runtime-detected** instead of hardcoded:
+- `sway-sunshine/sway-wrapper.sh` scans `/run/user/$(id -u)/wayland-*` sockets at startup (skipping `*.lock`), takes the next free number (`wayland-$((NEXT + 1))`), exports it for the sway process, and records it to `/run/user/$(id -u)/sway-sunshine-display` in `KEY=VALUE` format.
+- `systemd/sunshine-headless.service` reads that file via `EnvironmentFile=-/run/user/%U/sway-sunshine-display` (the `-` makes it optional; the service file carries no display env var of its own).
+- The game launcher scripts (`start-steam-game.sh`, `start-lutris-game.sh`, `start-heroic-game.sh`) resolve the display at runtime from the same file, falling back to `wayland-1` if it is missing.
+
+**Diagnosis commands:** To confirm which process owns each Wayland socket when the symptom recurs:
+```bash
+ss -xlp | grep wayland
+# or per process:
+ls -l /proc/PID/fd | grep wayland
+```
+Confirm which monitor Sunshine selected when it started:
+```bash
+grep -i "Selected monitor" ~/.config/sunshine/sunshine.log
+```
+If the selected monitor is a Hyprland/desktop output rather than `HEADLESS-1`, Sunshine is pointed at the wrong session.
 
 ## Scripts in `sway-sunshine/`
 
@@ -247,15 +285,15 @@ Runner types:
 
 The install script:
 - Templates user ID into `set-resolution.sh` and `reset-resolution.sh` (replaces `/run/user/1000/`)
-- Templates `WAYLAND_DISPLAY` into `start-steam-game.sh` based on detected display number
 - Copies `start-steam-game.sh`, `stop-steam-game.sh`, and `sway-wrapper.sh` to `~/.config/sway-sunshine/`
 - Checks for a stale sway-sunshine session via PID file (`/run/user/$USER_ID/sway-sunshine.pid`), sends SIGINT with 10s grace period, falls back to SIGKILL if needed
 - Overwrites sunshine.conf from template on each run
 - Preserves existing apps.json if it already exists, running auto-migration (prep-cmd updates, duplicate cleanup)
 - Auto-detects DE for input isolation (Hyprland: no udev rule, uses hyprctl runtime disable; GNOME: mutter-device-ignore udev rule)
 - Installs DE-appropriate udev rule to `/etc/udev/rules.d/85-sunshine-input-isolation.rules` (GNOME only; skipped entirely on Hyprland — input isolation is handled by the Sway config plus the hyprctl runtime helper in LutrisToSunshine)
-- Auto-detects Wayland display number for the headless session (finds latest `wayland-*` socket and increments)
-- Templates `WAYLAND_DISPLAY` into both `sway-sunshine.service` and `sunshine-headless.service`
+- Auto-detects the Wayland display number for the headless session. It no longer trusts the value in the installed service file (that was the bug: it kept the stale `wayland-1` forever). Instead it first tries to **reuse the recorded display file** (`/run/user/$USER_ID/sway-sunshine-display`) only if that socket is currently free; otherwise it **auto-detects the next free number** after the highest existing `wayland-*` socket (with `wayland-1` as the default when no sockets are present)
+- No longer templates `WAYLAND_DISPLAY` into the service files: `sway-sunshine.service` carries no hardcoded display (Sway binds whatever socket is free, and `publish-display.sh` records the real value), while `sunshine-headless.service` reads it via `EnvironmentFile=-/run/user/%U/sway-sunshine-display`
+- Installs the launcher scripts (`start-steam-game.sh`, `start-lutris-game.sh`, `start-heroic-game.sh`) with plain `cp` rather than sed-templating, since each script resolves `WAYLAND_DISPLAY` at runtime from the display file
 - Replaces `ExecStart` in `sunshine-headless.service` with the detected Sunshine path (preserves `sg input -c` wrapper)
 
 ## KDE Plasma Wayland Compatibility (Updated 2026-04-25)
@@ -277,10 +315,9 @@ The install script:
 ```bash
 ls /run/user/$(id -u)/wayland-*
 ```
-If the headless Sway session uses a different display number (e.g., `wayland-2`), both service files are automatically templated by install.sh. Always verify after installation:
+If the headless Sway session uses a different display number (e.g., `wayland-2`), install.sh detects it at install time and the running session records it in the display file. Always verify after installation:
 ```bash
-grep WAYLAND_DISPLAY ~/.config/systemd/user/sway-sunshine.service
-grep WAYLAND_DISPLAY ~/.config/systemd/user/sunshine-headless.service
+cat /run/user/$(id -u)/sway-sunshine-display
 ```
 
 ### Cross-GPU DMA-BUF Failure (KMS-specific)
@@ -372,7 +409,7 @@ Users on bleeding-edge distros (CachyOS, Nobara) with recent NVIDIA drivers have
 ```
 
 **Troubleshooting steps:**
-1. **Verify Wayland display number** — Stale `wayland-*` sockets from crashed sessions can confuse install.sh's auto-detection. Check with `ls /run/user/$(id -u)/wayland-*`. Run `./install.sh` to detect and stop any stale sway-sunshine session (via PID file) before re-detecting the display number. Verify the templated value: `grep WAYLAND_DISPLAY ~/.config/systemd/user/sway-sunshine.service`.
+1. **Verify Wayland display number** — Stale `wayland-*` sockets from crashed sessions can confuse install.sh's auto-detection. Check with `ls /run/user/$(id -u)/wayland-*`. Run `./install.sh` to detect and stop any stale sway-sunshine session (via PID file) before re-detecting the display number. The **source of truth is the recorded display file** `/run/user/$(id -u)/sway-sunshine-display` — read it with `cat` and confirm it matches the socket the headless session actually owns. The installed service files carry no display value of their own.
 2. **Try `WLR_RENDERER=vulkan`** — Some NVIDIA driver versions work better with the Vulkan renderer than gles2. Update `WLR_RENDERER` in `sway-sunshine.service`.
 3. **Check NVIDIA driver version** — Bleeding-edge drivers (e.g., 595+) may have regressions. Try rolling back to a stable driver version if issues persist.
 4. **Verify Vulkan/VCN availability** — Run `vulkaninfo` and check that the NVIDIA Vulkan ICD is properly installed (`/usr/share/vulkan/icd.d/nvidia_icd.json` exists).

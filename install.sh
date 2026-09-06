@@ -171,30 +171,36 @@ if [ -f "$PID_FILE" ]; then
 fi
 
 # Detect Wayland display for the headless session
-# Strategy: prefer the value already set in the installed service file (avoids
-# conflicts when the user has already started sway-sunshine manually), fall back
-# to auto-detection on fresh installs.
+# Strategy: reuse a recorded display from a previous headless session only if
+# its socket is currently free; otherwise auto-detect the next free number.
+# NOTE: do NOT trust the value in the installed service file — after a DE
+# upgrade the main desktop may take a different display number (e.g. omarchy
+# 4.0 moved Hyprland from wayland-0 to wayland-1), which would make Sunshine
+# capture the main desktop instead of the headless session.
 HEADLESS_DISPLAY=""
+RUNTIME_DIR="/run/user/$(id -u)"
 
-# 1. Check if the installed service file already has WAYLAND_DISPLAY set
-INSTALLED_SERVICE="$SYSTEMD_DIR/sway-sunshine.service"
-if [ -f "$INSTALLED_SERVICE" ]; then
-    EXISTING_DISPLAY=$(grep '^Environment=WAYLAND_DISPLAY=' "$INSTALLED_SERVICE" | head -1 | sed 's|^Environment=WAYLAND_DISPLAY=||')
-    if [ -n "$EXISTING_DISPLAY" ]; then
-        HEADLESS_DISPLAY="$EXISTING_DISPLAY"
-        echo "Found existing WAYLAND_DISPLAY=$HEADLESS_DISPLAY in installed service file — using that value"
+# 1. Reuse recorded display from a previous session if its socket is free
+DISPLAY_FILE="$RUNTIME_DIR/sway-sunshine-display"
+if [ -f "$DISPLAY_FILE" ]; then
+    CANDIDATE=$(sed -n 's/^WAYLAND_DISPLAY=//p' "$DISPLAY_FILE")
+    if [ -n "$CANDIDATE" ] && [ ! -e "$RUNTIME_DIR/$CANDIDATE" ]; then
+        HEADLESS_DISPLAY="$CANDIDATE"
+        echo "Reusing recorded WAYLAND_DISPLAY=$HEADLESS_DISPLAY (socket is free)"
     fi
 fi
 
-# 2. Fall back to auto-detection if no existing display was found
+# 2. Fall back to auto-detection: next free number after the highest socket
 if [ -z "$HEADLESS_DISPLAY" ]; then
-    MAIN_WAYLAND=$(ls /run/user/$(id -u)/wayland-* 2>/dev/null | grep -v lock | sort | tail -1 | xargs basename)
-    if [ "$MAIN_WAYLAND" = "wayland-0" ]; then
+    MAIN_WAYLAND=$(ls "$RUNTIME_DIR"/wayland-* 2>/dev/null | grep -v lock | sort | tail -1 | xargs basename 2>/dev/null || true)
+    if [ -z "$MAIN_WAYLAND" ]; then
+        HEADLESS_DISPLAY="wayland-1"
+    elif [ "$MAIN_WAYLAND" = "wayland-0" ]; then
         HEADLESS_DISPLAY="wayland-1"
     else
         HEADLESS_DISPLAY="wayland-$((${MAIN_WAYLAND##wayland-} + 1))"
     fi
-    echo "Auto-detected main display: $MAIN_WAYLAND, headless will be: $HEADLESS_DISPLAY"
+    echo "Auto-detected main display: ${MAIN_WAYLAND:-none}, headless will be: $HEADLESS_DISPLAY"
 fi
 
 echo ""
@@ -203,6 +209,10 @@ echo "Installing config files..."
 # Sway config
 mkdir -p "$SWAY_CONFIG_DIR"
 cp "$SCRIPT_DIR/sway-sunshine/config" "$SWAY_CONFIG_DIR/config"
+
+# Display re-publish helper (invoked from the Sway config; re-publishes the real WAYLAND_DISPLAY after Sway binds its socket)
+cp "$SCRIPT_DIR/sway-sunshine/publish-display.sh" "$SWAY_CONFIG_DIR/publish-display.sh"
+chmod +x "$SWAY_CONFIG_DIR/publish-display.sh"
 
 # Resolution scripts (template the user ID into them)
 sed "s|/run/user/1000/|/run/user/$USER_ID/|g" \
@@ -214,23 +224,20 @@ chmod +x "$SWAY_CONFIG_DIR/set-resolution.sh"
 chmod +x "$SWAY_CONFIG_DIR/reset-resolution.sh"
 chmod +x "$SWAY_CONFIG_DIR/restore-default-sink.sh"
 
-# Steam scripts (template WAYLAND_DISPLAY for non-default display numbers)
-sed "s|WAYLAND_DISPLAY=\"wayland-1\"|WAYLAND_DISPLAY=\"$HEADLESS_DISPLAY\"|" \
-    "$SCRIPT_DIR/sway-sunshine/start-steam-game.sh" > "$SWAY_CONFIG_DIR/start-steam-game.sh"
+# Steam scripts (WAYLAND_DISPLAY is resolved at runtime by the script itself)
+cp "$SCRIPT_DIR/sway-sunshine/start-steam-game.sh" "$SWAY_CONFIG_DIR/start-steam-game.sh"
 cp "$SCRIPT_DIR/sway-sunshine/stop-steam-game.sh" "$SWAY_CONFIG_DIR/stop-steam-game.sh"
 chmod +x "$SWAY_CONFIG_DIR/start-steam-game.sh"
 chmod +x "$SWAY_CONFIG_DIR/stop-steam-game.sh"
 
-# Lutris scripts (template WAYLAND_DISPLAY for non-default display numbers)
-sed "s|WAYLAND_DISPLAY=\"wayland-1\"|WAYLAND_DISPLAY=\"$HEADLESS_DISPLAY\"|" \
-    "$SCRIPT_DIR/sway-sunshine/start-lutris-game.sh" > "$SWAY_CONFIG_DIR/start-lutris-game.sh"
+# Lutris scripts (WAYLAND_DISPLAY is resolved at runtime by the script itself)
+cp "$SCRIPT_DIR/sway-sunshine/start-lutris-game.sh" "$SWAY_CONFIG_DIR/start-lutris-game.sh"
 cp "$SCRIPT_DIR/sway-sunshine/stop-lutris-game.sh" "$SWAY_CONFIG_DIR/stop-lutris-game.sh"
 chmod +x "$SWAY_CONFIG_DIR/start-lutris-game.sh"
 chmod +x "$SWAY_CONFIG_DIR/stop-lutris-game.sh"
 
-# Heroic scripts (template WAYLAND_DISPLAY for non-default display numbers)
-sed "s|WAYLAND_DISPLAY=\"wayland-1\"|WAYLAND_DISPLAY=\"$HEADLESS_DISPLAY\"|" \
-    "$SCRIPT_DIR/sway-sunshine/start-heroic-game.sh" > "$SWAY_CONFIG_DIR/start-heroic-game.sh"
+# Heroic scripts (WAYLAND_DISPLAY is resolved at runtime by the script itself)
+cp "$SCRIPT_DIR/sway-sunshine/start-heroic-game.sh" "$SWAY_CONFIG_DIR/start-heroic-game.sh"
 cp "$SCRIPT_DIR/sway-sunshine/stop-heroic-game.sh" "$SWAY_CONFIG_DIR/stop-heroic-game.sh"
 chmod +x "$SWAY_CONFIG_DIR/start-heroic-game.sh"
 chmod +x "$SWAY_CONFIG_DIR/stop-heroic-game.sh"

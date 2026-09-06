@@ -21,7 +21,6 @@ Environment=PULSE_SINK=sink-sunshine-stereo
 # the correct GPU (use "ls -la /dev/dri/renderD*" and check vendor IDs).
 # For single-GPU systems, renderD128 is usually correct.
 Environment=WLR_DRM_DEVICES=/dev/dri/renderD129
-Environment=WAYLAND_DISPLAY=wayland-1
 Environment=DISPLAY=:0
 Environment=__GL_GSYNC_ALLOWED=0
 Environment=__NV_PRIME_RENDER_OFFLOAD=1
