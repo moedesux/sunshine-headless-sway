@@ -39,6 +39,20 @@ if [ -z "$APPID" ]; then
     exit 1
 fi
 
+# Disable the omarchy screensaver for the duration of this game stream. The
+# GPU-heavy TTE screensaver effect runs on the main Hyprland desktop while the
+# game runs in the headless Sway session and competes for GPU resources, which
+# drops in-game FPS. `omarchy-toggle screensaver-off on` creates the flag file
+# that gates omarchy-launch-screensaver; the stop script removes it at stream
+# end to restore the default (enabled) state.
+if command -v omarchy-toggle >/dev/null 2>&1; then
+    omarchy-toggle screensaver-off on 2>/dev/null \
+        && echo "[$(date)] Screensaver disabled (omarchy-toggle screensaver-off on)" >> "$LOG_FILE" \
+        || echo "[$(date)] WARNING: failed to disable omarchy screensaver" >> "$LOG_FILE"
+else
+    echo "[$(date)] NOTE: omarchy-toggle not found, skipping screensaver disable" >> "$LOG_FILE"
+fi
+
 # Shut down any running Steam instance
 if pgrep -x steam > /dev/null 2>&1; then
     steam -shutdown 2>/dev/null

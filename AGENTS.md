@@ -149,13 +149,23 @@ Launches a Steam game in the headless Sway session. **Kills ALL Steam processes 
 - Checks for Sway IPC socket existence (`sway-sunshine.sock`) before launching
 - Graceful shutdown of any existing Steam instance (`steam -shutdown`, wait, force kill)
 - Cleanup of Steam IPC files (`~/.steam/steam.pid`, `/tmp/steam_singleton_*`)
+- **Disables the omarchy screensaver** for the stream via `omarchy-toggle screensaver-off on` (see *Omarchy screensaver toggle* below)
 - Launch via `swaymsg exec` in the headless session
 - Accepts: `<appid>`, `bigpicture`, or `0` (plain Steam)
 
 ### `stop-steam-game.sh`
-Shuts down ALL Steam processes system-wide and cleans up IPC. Used as **prep-cmd.undo** for Steam entries. Note: does NOT restart Steam on the main desktop.
+Shuts down ALL Steam processes system-wide and cleans up IPC. Used as **prep-cmd.undo** for Steam entries. Note: does NOT restart Steam on the main desktop. **Re-enables the omarchy screensaver** at stream end via `omarchy-toggle screensaver-off off` (removes the flag that `start-steam-game.sh` created).
 
 > **Note:** `start-steam-game.sh` and `stop-steam-game.sh` are automatically installed by `install.sh`.
+
+### Omarchy screensaver toggle (Steam streams)
+
+The GPU-heavy omarchy TTE screensaver effect runs on the **main Hyprland desktop** while the game runs in the **headless Sway session**, and the two compete for GPU resources, dropping in-game FPS. Steam game streams therefore toggle it off for the duration of the session:
+
+- **Stream start** (`start-steam-game.sh`, run as `detached`): `omarchy-toggle screensaver-off on` — creates the flag file `~/.local/state/omarchy/toggles/screensaver-off`. While the flag exists, `omarchy-launch-screensaver` exits (screensaver **disabled**).
+- **Stream end** (`stop-steam-game.sh`, run as `prep-cmd` undo): `omarchy-toggle screensaver-off off` — removes the flag, restoring the screensaver's default **enabled** state.
+
+`omarchy-toggle <flag> [on|off|toggle]` lives at `/usr/share/omarchy/bin/omarchy-toggle` (`on` = `touch`, `off` = `rm -f`). Both hooks are guarded by `command -v omarchy-toggle` and log success/warning to their script's log, so a missing tool never breaks the stream. Note: the interactive `omarchy toggle screensaver` command is a **flip**, not a set — these scripts use the deterministic `on`/`off` set form. This toggle is wired into the **Steam** scripts only; Lutris and Heroic launches do not touch it.
 
 ### `sway-wrapper.sh`
 Thin wrapper that writes the sway-sunshine process PID to `/run/user/$USER_ID/sway-sunshine.pid` before exec'ing sway. Uses an EXIT trap to clean up the PID file. This enables external tools (install.sh) to detect and gracefully stop a running sway-sunshine session. Used as the `ExecStart` target in `sway-sunshine.service` instead of calling sway directly.

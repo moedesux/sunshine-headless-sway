@@ -157,4 +157,16 @@ else
     log "ERROR: systemd-run not found. Cannot restart Steam."
 fi
 
+# Re-enable the omarchy screensaver now that the stream has ended (it was
+# disabled by start-steam-game.sh). `omarchy-toggle screensaver-off off`
+# removes the flag file that gates omarchy-launch-screensaver, restoring the
+# screensaver's default enabled state.
+if command -v omarchy-toggle >/dev/null 2>&1; then
+    omarchy-toggle screensaver-off off 2>/dev/null \
+        && log "Screensaver re-enabled (omarchy-toggle screensaver-off off)" \
+        || log "WARNING: failed to re-enable omarchy screensaver"
+else
+    log "NOTE: omarchy-toggle not found, skipping screensaver re-enable"
+fi
+
 log "=== stop-steam-game.sh finished ==="
