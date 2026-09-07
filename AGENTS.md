@@ -142,7 +142,15 @@ Called by Sunshine as a **prep-cmd.do** when a client connects. Uses `swaymsg` t
 Called by Sunshine as a **prep-cmd.undo** when a client disconnects. Resets headless output to 1920x1080@60Hz.
 
 ### `restore-default-sink.sh`
-Restores the host's default audio sink after Sunshine changes it (Sunshine sets `audio_sink` as system default on connect). Uses `systemd-run` to spawn a detached watcher that survives prep-cmd cleanup, polling wpctl for 30s to detect and restore the original default sink.
+Restores the host's default audio sink after a Sunshine stream ends. Sunshine points the system default sink at `sink-sunshine-stereo` while a client is connected and does NOT restore it on disconnect. This script runs as a **prep-cmd (do)** at stream start: it stops any stale `sunshine-sink-restore` unit and starts a fresh detached watchdog via `systemd-run --user --no-block --unit=sunshine-sink-restore "$0" --watchdog`.
+
+The watchdog polls every 2s (up to 30 min) and restores the default when **both** hold:
+- the current default sink name still contains "sunshine", and
+- no sink input is actively (uncorked) playing into any sunshine sink (so a game that is still running after the client disconnects keeps its audio in the stream until it stops).
+
+It restores with `pactl set-default-sink <name>` (name-based, not volatile IDs), which also persists the choice in WirePlumber's `default-nodes` state, so the host sink survives restarts. The preferred sink name is read from `~/.config/sway-sunshine/host-audio-sink` (written by install.sh); if that sink no longer exists it falls back to the first available non-sunshine sink. Watchdog log: `journalctl --user -u sunshine-sink-restore`.
+
+Note: sink inputs are matched to sunshine sinks by pulse **index** (`pactl list sinks short`), because this distro's `pactl list sink-inputs` reports `Sink: <index>`, not the sink name.
 
 ### `start-steam-game.sh`
 Launches a Steam game in the headless Sway session. **Kills ALL Steam processes system-wide** (including any running on the main desktop) before launching in the headless session. Handles:
@@ -291,6 +299,17 @@ Runner types:
 - `nile` - Amazon Prime Games (formerly Luna)
 - `sideload` - Sideloaded games
 
+## Audio Troubleshooting
+
+### Game silent on TV (video OK, audio path connected)
+If the game is playing into `sink-sunshine-stereo`, Sunshine is encoding Opus, but the TV is silent, check the **WirePlumber per-app stream volume**. WirePlumber persists per-app volumes in `~/.local/state/wireplumber/stream-properties` (not JSON; app names escape spaces as `\s`) and restores them on every launch. A stale near-zero value survives reboots and re-launches — e.g. `channelVolumes: [0.001119]` ≈ **−59 dB** (these are linear ratios: 1.0 = 0 dB, 0.001 ≈ −60 dB).
+
+- Check: `wpctl status` shows each stream's volume; or grep the state file for the escaped game name.
+- Fix: `wpctl set-volume <stream-id> 100%` — updates live state and re-persists automatically (verified: the state file is rewritten with `channelVolumes: [1.000000, 1.000000]`).
+
+### Default sink stuck on `sink-sunshine-stereo` after a stream
+`restore-default-sink.sh`'s watchdog restores the host sink (see above) a few seconds after the stream and game audio stop. If it is still stuck: check `journalctl --user -u sunshine-sink-restore`, verify `~/.config/sway-sunshine/host-audio-sink` holds an existing sink name (`pactl list sinks short`), and restore manually with `pactl set-default-sink <name>` (persists in WirePlumber's `default-nodes` state).
+
 ## install.sh Behavior
 
 The install script:
@@ -304,6 +323,7 @@ The install script:
 - Auto-detects the Wayland display number for the headless session. It no longer trusts the value in the installed service file (that was the bug: it kept the stale `wayland-1` forever). Instead it first tries to **reuse the recorded display file** (`/run/user/$USER_ID/sway-sunshine-display`) only if that socket is currently free; otherwise it **auto-detects the next free number** after the highest existing `wayland-*` socket (with `wayland-1` as the default when no sockets are present)
 - No longer templates `WAYLAND_DISPLAY` into the service files: `sway-sunshine.service` carries no hardcoded display (Sway binds whatever socket is free, and `publish-display.sh` records the real value), while `sunshine-headless.service` reads it via `EnvironmentFile=-/run/user/%U/sway-sunshine-display`
 - Installs the launcher scripts (`start-steam-game.sh`, `start-lutris-game.sh`, `start-heroic-game.sh`) with plain `cp` rather than sed-templating, since each script resolves `WAYLAND_DISPLAY` at runtime from the display file
+- Records the **host audio sink preference**: asks which non-sunshine sink is the main desktop output (lists candidates with the current default marked, defaults to it) and writes the chosen pulse sink name to `~/.config/sway-sunshine/host-audio-sink`. Reuses the saved name if that sink still exists (so it only re-asks after a monitor change); in non-interactive mode falls back to the current default, then the first available sink. Used by `restore-default-sink.sh` to return audio to the right output after a stream
 - Replaces `ExecStart` in `sunshine-headless.service` with the detected Sunshine path (preserves `sg input -c` wrapper)
 
 ## KDE Plasma Wayland Compatibility (Updated 2026-04-25)

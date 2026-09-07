@@ -203,6 +203,60 @@ if [ -z "$HEADLESS_DISPLAY" ]; then
     echo "Auto-detected main display: ${MAIN_WAYLAND:-none}, headless will be: $HEADLESS_DISPLAY"
 fi
 
+# ─── Host audio sink preference ─────────────────────────────────────────────
+# Sunshine points the system default audio sink at its null capture sink
+# (sink-sunshine-stereo) while a client is connected and does not restore the
+# previous default afterwards. The sink chosen here is recorded and used by
+# restore-default-sink.sh to return audio to the user's real output after a
+# stream. Re-run ./install.sh after changing monitors to re-record the choice.
+echo ""
+echo "Configuring host audio sink preference..."
+mkdir -p "$SWAY_CONFIG_DIR"
+HOST_SINK_PREFERENCE_FILE="$SWAY_CONFIG_DIR/host-audio-sink"
+CURRENT_DEFAULT_SINK=$(pactl info 2>/dev/null | awk -F': ' '/^Default Sink:/{print $2; exit}' || true)
+SAVED_HOST_SINK=$(sed -n '1p' "$HOST_SINK_PREFERENCE_FILE" 2>/dev/null || true)
+REAL_SINKS=$(pactl list sinks short 2>/dev/null | awk '{ s = tolower($2); if (s !~ /sunshine/) print }' || true)
+HOST_SINK_NAME=""
+
+if [ -z "$REAL_SINKS" ]; then
+    echo "  Warning: no non-sunshine audio outputs found — skipping preference."
+elif [ -n "$SAVED_HOST_SINK" ] && echo "$REAL_SINKS" | awk '{print $2}' | grep -qxF "$SAVED_HOST_SINK"; then
+    HOST_SINK_NAME="$SAVED_HOST_SINK"
+    echo "  Using saved host audio sink: $HOST_SINK_NAME"
+elif [ -t 0 ]; then
+    echo "  Available audio outputs:"
+    CHOICE_COUNT=0
+    DEFAULT_CHOICE=1
+    while read -r idx name _rest; do
+        CHOICE_COUNT=$((CHOICE_COUNT + 1))
+        if [ "$name" = "$CURRENT_DEFAULT_SINK" ]; then
+            mark=" (current default)"
+            DEFAULT_CHOICE=$CHOICE_COUNT
+        else
+            mark=""
+        fi
+        printf "   %d) %s%s\n" "$CHOICE_COUNT" "$name" "$mark"
+    done <<< "$REAL_SINKS"
+    read -rp "  Select your main desktop audio sink [1-$CHOICE_COUNT] (default: $DEFAULT_CHOICE): " HOST_SINK_CHOICE || true
+    if [[ "${HOST_SINK_CHOICE:-}" =~ ^[0-9]+$ ]] && [ "${HOST_SINK_CHOICE:-0}" -ge 1 ] && [ "${HOST_SINK_CHOICE:-0}" -le "$CHOICE_COUNT" ]; then
+        HOST_SINK_NAME=$(echo "$REAL_SINKS" | awk -v n="$HOST_SINK_CHOICE" 'NR==n{print $2}')
+    else
+        HOST_SINK_NAME=$(echo "$REAL_SINKS" | awk -v n="$DEFAULT_CHOICE" 'NR==n{print $2}')
+        echo "  Using selection $DEFAULT_CHOICE: $HOST_SINK_NAME"
+    fi
+else
+    if [ -n "$CURRENT_DEFAULT_SINK" ] && echo "$REAL_SINKS" | awk '{print $2}' | grep -qxF "$CURRENT_DEFAULT_SINK"; then
+        HOST_SINK_NAME="$CURRENT_DEFAULT_SINK"
+        echo "  Non-interactive: using current default: $HOST_SINK_NAME"
+    else
+        HOST_SINK_NAME=$(echo "$REAL_SINKS" | awk 'NR==1{print $2}')
+        echo "  Non-interactive: using first available: $HOST_SINK_NAME (re-run ./install.sh interactively to change)"
+    fi
+fi
+if [ -n "$HOST_SINK_NAME" ]; then
+    printf '%s\n' "$HOST_SINK_NAME" > "$HOST_SINK_PREFERENCE_FILE"
+fi
+
 echo ""
 echo "Installing config files..."
 
@@ -488,6 +542,7 @@ echo "=== Installation complete ==="
 echo ""
 echo "Desktop environment: $([ "$DETECTED_DE" = "gnome" ] && echo "GNOME" || echo "Hyprland")"
 echo "Wayland display: $HEADLESS_DISPLAY"
+echo "Host audio sink: ${HOST_SINK_NAME:-<not set>}"
 echo ""
 echo "To start streaming now:"
 echo "  systemctl --user start sway-sunshine.service"

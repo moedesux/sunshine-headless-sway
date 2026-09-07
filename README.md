@@ -132,7 +132,7 @@ Game audio is routed exclusively to the Moonlight stream without touching your h
 - A persistent PipeWire null sink (`sink-sunshine-stereo`) is created via config drop-in — it always exists, even when Moonlight is disconnected or backgrounded
 - `PULSE_SINK=sink-sunshine-stereo` is set in the Sway service environment, so apps launched in the headless session output to this sink
 - `audio_sink = sink-sunshine-stereo` in `sunshine.conf` tells Sunshine to capture from that sink
-- `restore-default-sink.sh` runs as a prep command to prevent Sunshine from hijacking your host's default audio sink — it detects the change and restores it within seconds
+- `restore-default-sink.sh` runs as a prep command to prevent Sunshine from hijacking your host's default audio sink — it starts a detached watchdog that restores the host sink you choose during `./install.sh` a few seconds after the stream ends and game audio stops
 - When Moonlight is backgrounded, game audio stays in the persistent null sink (silent) instead of reverting to your host speakers
 - Your main desktop audio continues through your normal output device
 
