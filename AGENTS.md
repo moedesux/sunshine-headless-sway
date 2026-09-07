@@ -152,6 +152,19 @@ It restores with `pactl set-default-sink <name>` (name-based, not volatile IDs),
 
 Note: sink inputs are matched to sunshine sinks by pulse **index** (`pactl list sinks short`), because this distro's `pactl list sink-inputs` reports `Sink: <index>`, not the sink name.
 
+### `set-host-audio-sink.sh`
+Changes the preferred host audio sink **without re-running `./install.sh`**:
+
+```bash
+set-host-audio-sink.sh              # interactive: lists non-sunshine sinks, pick by number
+set-host-audio-sink.sh <sink-name>  # apply a specific sink (exact name from `pactl list sinks short`)
+set-host-audio-sink.sh --show       # print recorded preference + current default; changes nothing
+```
+
+Applying does two things: writes the name to `~/.config/sway-sunshine/host-audio-sink` (the preference consumed by `restore-default-sink.sh`), then applies it live with `pactl set-default-sink <name>` (which also persists in WirePlumber's `default-nodes` state). It rejects non-existent names and Sunshine's own sinks, and exits non-zero with a message on invalid input. It is safe to run during an active stream (in-stream game audio is pinned to the null sink via `PULSE_SINK`), and the already-running `sunshine-sink-restore` watchdog re-reads the preference file on every check, so a mid-stream change is picked up without a restart.
+
+> **Note:** `set-host-audio-sink.sh` is automatically installed by `install.sh` (plain `cp` + `chmod +x`, alongside `restore-default-sink.sh`).
+
 ### `start-steam-game.sh`
 Launches a Steam game in the headless Sway session. **Kills ALL Steam processes system-wide** (including any running on the main desktop) before launching in the headless session. Handles:
 - Checks for Sway IPC socket existence (`sway-sunshine.sock`) before launching
@@ -308,7 +321,7 @@ If the game is playing into `sink-sunshine-stereo`, Sunshine is encoding Opus, b
 - Fix: `wpctl set-volume <stream-id> 100%` — updates live state and re-persists automatically (verified: the state file is rewritten with `channelVolumes: [1.000000, 1.000000]`).
 
 ### Default sink stuck on `sink-sunshine-stereo` after a stream
-`restore-default-sink.sh`'s watchdog restores the host sink (see above) a few seconds after the stream and game audio stop. If it is still stuck: check `journalctl --user -u sunshine-sink-restore`, verify `~/.config/sway-sunshine/host-audio-sink` holds an existing sink name (`pactl list sinks short`), and restore manually with `pactl set-default-sink <name>` (persists in WirePlumber's `default-nodes` state).
+`restore-default-sink.sh`'s watchdog restores the host sink (see above) a few seconds after the stream and game audio stop. If it is still stuck: check `journalctl --user -u sunshine-sink-restore`, verify `~/.config/sway-sunshine/host-audio-sink` holds an existing sink name (`pactl list sinks short`), and restore manually with `pactl set-default-sink <name>` (persists in WirePlumber's `default-nodes` state) — or run `~/.config/sway-sunshine/set-host-audio-sink.sh` to fix both the live default and the recorded preference in one step.
 
 ## install.sh Behavior
 
@@ -323,8 +336,8 @@ The install script:
 - Auto-detects the Wayland display number for the headless session. It no longer trusts the value in the installed service file (that was the bug: it kept the stale `wayland-1` forever). Instead it first tries to **reuse the recorded display file** (`/run/user/$USER_ID/sway-sunshine-display`) only if that socket is currently free; otherwise it **auto-detects the next free number** after the highest existing `wayland-*` socket (with `wayland-1` as the default when no sockets are present)
 - No longer templates `WAYLAND_DISPLAY` into the service files: `sway-sunshine.service` carries no hardcoded display (Sway binds whatever socket is free, and `publish-display.sh` records the real value), while `sunshine-headless.service` reads it via `EnvironmentFile=-/run/user/%U/sway-sunshine-display`
 - Installs the launcher scripts (`start-steam-game.sh`, `start-lutris-game.sh`, `start-heroic-game.sh`) with plain `cp` rather than sed-templating, since each script resolves `WAYLAND_DISPLAY` at runtime from the display file
-- Records the **host audio sink preference**: asks which non-sunshine sink is the main desktop output (lists candidates with the current default marked, defaults to it) and writes the chosen pulse sink name to `~/.config/sway-sunshine/host-audio-sink`. Reuses the saved name if that sink still exists (so it only re-asks after a monitor change); in non-interactive mode falls back to the current default, then the first available sink. Used by `restore-default-sink.sh` to return audio to the right output after a stream
-- Replaces `ExecStart` in `sunshine-headless.service` with the detected Sunshine path (preserves `sg input -c` wrapper)
+- Records the **host audio sink preference**: asks which non-sunshine sink is the main desktop output (lists candidates with the current default marked, defaults to it) and writes the chosen pulse sink name to `~/.config/sway-sunshine/host-audio-sink`. Reuses the saved name if that sink still exists (so it only re-asks after a monitor change); in non-interactive mode falls back to the current default, then the first available sink. Used by `restore-default-sink.sh` to return audio to the right output after a stream. To change it later without reinstalling, use `~/.config/sway-sunshine/set-host-audio-sink.sh` (installed by this script)
+- Replaces the `ExecStart` line in `sunshine-headless.service` **wholesale** with the detected Sunshine path — note this drops the template's `/usr/bin/sg input -c` wrapper, so live units run `/usr/bin/sunshine` directly. If input-group access is ever needed, re-add the wrapper in the template deliberately
 
 ## KDE Plasma Wayland Compatibility (Updated 2026-04-25)
 
@@ -563,20 +576,19 @@ systemctl --user show-environment | grep -i egl
 
 **Note:** The old diagnosis that these 3 vars were 'inherited from the Hyprland session' was WRONG — they come from live-only drop-in overrides (`~/.config/systemd/user/*.service.d/override.conf`) present on both DEs and are constant. The true DE-specific differentiator is only `__EGL_VENDOR_LIBRARY_FILENAMES`.
 
-## Current host snapshot (2026-08-02)
+## Current host snapshot (2026-09-07)
 
-This section records the live configuration inspected on 2026-08-02. It is a diagnostic snapshot, not a replacement for the repository templates above.
+This section records the live configuration inspected on 2026-09-07. It is a diagnostic snapshot, not a replacement for the repository templates above — the rest of this file is the source of truth.
 
 ### Host and GPU
 
-- User is `moe` (UID 1000), running KDE Plasma Wayland (`XDG_CURRENT_DESKTOP=KDE`).
-- The machine has an NVIDIA GeForce RTX 5090 (PCI vendor `10de`) and an AMD Strix Halo/Radeon 8050S/8060S display controller (vendor `1002`). Both `nvidia`/`nvidia_drm` and `amdgpu` kernel modules are loaded.
-- Installed NVIDIA userspace is 610.43.03; the active Sunshine log confirms NVENC rather than VAAPI/software encoding.
-- The configured render node is `/dev/dri/renderD129`. Keep this aligned across `WLR_DRM_DEVICES` and Sunshine `adapter_name`; verify node numbering after driver or kernel changes because render numbers are not a permanent hardware identity.
+- User is `moe` (UID 1000), running **Hyprland (omarchy) via uwsm** on Wayland. (KDE Plasma is no longer the main desktop.)
+- The machine has an NVIDIA GeForce RTX 5090 (PCI vendor `10de`) and an AMD Strix Halo/Radeon 8050S APU (vendor `1002`). The desktop renders on the APU and scan-outs to the NVIDIA card via PRIME.
+- The configured render node is `/dev/dri/renderD129` (NVIDIA). Keep it aligned across `WLR_DRM_DEVICES` and Sunshine `adapter_name`; verify node numbering after driver or kernel changes because render numbers are not a permanent hardware identity.
 
 ### Live Wayland and service topology
 
-The main KDE socket is `wayland-0`; the headless Sway socket is `wayland-1`. The live session also has `/run/user/1000/sway-sunshine.sock` and a PID file. The intended boot path is:
+Display numbering **changes per boot** — on the 2026-09-07 boot the main Hyprland sat on `wayland-2` and the headless Sway took `wayland-1` (recorded by `publish-display.sh` in `/run/user/1000/sway-sunshine-display`). Never assume a number; the display file is the only source of truth. The intended boot path is:
 
 ```text
 default.target
@@ -585,44 +597,44 @@ default.target
             └─ Moonlight client on the TV (network client)
 ```
 
-`sway-sunshine.service` is enabled through `default.target`; it uses `WLR_BACKENDS=headless`, `WLR_RENDERER=gles2`, `LIBSEAT_BACKEND=noop`, `WLR_LIBINPUT_NO_DEVICES=1`, `WLR_DRM_DEVICES=/dev/dri/renderD129`, and `WAYLAND_DISPLAY=wayland-1`. The wrapper at `~/.config/sway-sunshine/sway-wrapper.sh` records `/run/user/1000/sway-sunshine.pid` and then starts Sway.
-
-`sunshine-headless.service` requires the Sway service, waits two seconds, exports the same Wayland/Sway socket, and currently runs `/usr/bin/sunshine` directly. The checked-in template still uses `/usr/bin/sg input -c /usr/bin/sunshine`; this is an intentional live/template drift and must be resolved deliberately before the next deployment. Do not assume `systemctl --user` status from a restricted diagnostic shell; use a normal user session or inspect the Sunshine log and socket files.
-
-There is also a separate `~/.config/systemd/user/sunshine.service` unit. It is not part of the headless dependency chain and can conflict with the headless instance if enabled, because it starts another `/usr/bin/sunshine` with the same user configuration and network ports. Use only `sunshine-headless.service` for this setup unless the standalone unit is intentionally redesigned.
+- `sway-sunshine.service`: `ExecStart=%h/.config/sway-sunshine/sway-wrapper.sh`; `WLR_BACKENDS=headless`, `WLR_RENDERER=gles2` (+`WLR_RENDERER_ALLOW_SOFTWARE=1`), `PULSE_SINK=sink-sunshine-stereo`, `WLR_DRM_DEVICES=/dev/dri/renderD129`. No `WAYLAND_DISPLAY` in the unit — the display is file-driven (wrapper picks a free socket, `publish-display.sh` records the real one).
+- `sunshine-headless.service`: reads the display via `EnvironmentFile=-/run/user/%U/sway-sunshine-display`, and its `ExecStartPre` polls until the display file is newer than the Sway PID file. Live `ExecStart=/usr/bin/sunshine` runs **directly, without the `sg input -c` wrapper** — this is not accidental drift, it is deterministic: install.sh rewrites the ExecStart line wholesale with the detected path, so the template's `sg input -c` wrapper is never preserved. If input-group access is ever needed, re-add the wrapper in the template deliberately.
+- There is also a separate `~/.config/systemd/user/sunshine.service` unit. It is not part of the headless dependency chain and can conflict on ports if enabled. Use only `sunshine-headless.service`.
 
 ### Live Sunshine and audio configuration
 
-`~/.config/sunshine/sunshine.conf` currently contains:
+`~/.config/sunshine/sunshine.conf` (matches the repo template):
 
 ```ini
-adapter_name = /dev/dri/renderD129
+min_threads = 6
 audio_sink = sink-sunshine-stereo
 capture = wlr
-min_threads = 6
-minimum_fps_target = 20
-nvenc_preset = 3
+adapter_name = /dev/dri/renderD129
 ```
 
-Capture is WLR screencopy from Sway, not KWin. `adapter_name` pins DMA-BUF imports to the GPU used by Sway; the log shows `h264_nvenc`, `hevc_nvenc`, and `av1_nvenc` all available. The live log also shows successful capture of `HEADLESS-1`, a client session at 1920x1080, and the encoder switching to HEVC NVENC.
+Capture is WLR screencopy from Sway; the 2026-09-07 log shows `h264_nvenc`, `hevc_nvenc`, and `av1_nvenc` available and a successful capture of `HEADLESS-1`.
 
-PipeWire creates the null sink `sink-sunshine-stereo` from `pipewire/sunshine-null-sink.conf`. Sunshine selects it on connection; `restore-default-sink.sh` starts a detached user watcher to restore the original host sink after disconnect.
+Audio: PipeWire creates the null sink `sink-sunshine-stereo` (from `pipewire/sunshine-null-sink.conf`); Sunshine selects it on connect. The host audio preference in `~/.config/sway-sunshine/host-audio-sink` is `alsa_output.pci-0000_03_00.1.hdmi-stereo` — the AOC 32G2WG3 monitor speakers (NVIDIA GB202 HDA "HDMI 0"; the monitor is cabled to NVIDIA DP-11 even though the desktop scan-outs via PRIME). The `sunshine-sink-restore` watchdog restores it after a stream, and `set-host-audio-sink.sh` changes the preference at runtime.
+
+Gotchas:
+- `pactl list sinks short` currently orders the sinks `sink-sunshine-stereo`, `alsa_output.pci-0000_c2_00.6.analog-stereo` (ALC623 jack), `alsa_output.pci-0000_03_00.1.hdmi-stereo` (AOC). The watchdog's **fallback** (first non-sunshine sink) is therefore the analog jack, *not* the AOC — the preference file is what keeps the restore on the right device. Deleting `host-audio-sink` degrades post-stream restore to the headphone jack; sink indices are volatile, names are the stable key.
+- The user's WirePlumber drop-in `~/.config/wireplumber/wireplumber.conf.d/50-rename-hdmi-sink.conf` mislabels the AMD iGPU's display-audio card as "AOC 32G2WG3 (HDMI)" — stale and misleading; don't touch it unless asked.
 
 ### Sway output, input, and game launch
 
-The Sway config disables physical outputs, enables `HEADLESS-1`, and advertises 1920x1080@60 plus 3840x2160@120. Sunshine prep commands change the mode to the Moonlight client's requested width, height, and FPS, then reset to 1080p/60 on disconnect. All physical input events are disabled; Sunshine virtual keyboard, mouse, touch, pen, and PS5-pad devices are explicitly enabled.
+The Sway config disables physical outputs, enables `HEADLESS-1` (1920x1080@60 + 3840x2160@120 advertised); prep commands change the mode to the client's requested resolution/fps and reset to 1080p60 on disconnect. All physical input is disabled; Sunshine's virtual keyboard/mouse/touch/pen/gamepad devices are enabled explicitly.
 
-The live `apps.json` is Sunshine v2 with 18 entries. Most entries launch through detached helper scripts: Lutris (IDs such as 6, 10, 16, 19, 21, 24, 25, 26, 28), Heroic/Legendary, or Steam (appid 3130330 and Big Picture). Entries consistently run sink restoration and dynamic resolution; game-specific undo scripts stop the relevant launcher. The low-resolution desktop entry is an exception and still uses an `xrandr` command targeting `HDMI-1`, which belongs to the physical desktop rather than the headless Sway output.
+The live `apps.json` is Sunshine v2 with 13 entries, all following the standard pattern: `restore-default-sink.sh` (do) + `set-resolution.sh` (do) with a launcher-appropriate undo — `stop-steam-game.sh` / `stop-lutris-game.sh` for games, `reset-resolution.sh` for the desktop entry. Games launch via the detached helpers: Lutris IDs 10, 14, 15, 16, 18, 19, 20, 21; Steam appids 110800, 1174180, 3130330 and Big Picture. (The old `xrandr`/`HDMI-1` desktop entry is gone — "Low Res Desktop" now uses the standard swaymsg-based resolution pair.)
 
-The installed launcher scripts hardcode `WAYLAND_DISPLAY=wayland-1` and use `/run/user/$(id -u)/sway-sunshine.sock`; resolution scripts use `/run/user/1000`. If the headless socket changes, update source templates and redeploy rather than editing `~/.config` manually. Steam and Lutris helpers intentionally terminate all matching processes system-wide before launching in headless Sway; this can close a desktop game/launcher.
+The launcher scripts resolve `WAYLAND_DISPLAY` at runtime from the display file (falling back to `wayland-1`); resolution scripts use the install-time-templated `/run/user/<uid>` paths. If the headless socket changes, update source templates and redeploy rather than editing `~/.config` manually. Steam/Lutris/Heroic helpers intentionally terminate all matching processes system-wide before launching in headless Sway.
 
 ### Verified streaming evidence
 
-`~/.config/sunshine/sunshine.log` from 2026-08-02 records Sunshine 2026.516 discovering `wayland-1`, `HEADLESS-1`, WLR screencopy, all three NVENC codecs, running the prep commands, starting Steam Big Picture, and accepting a client connection. This confirms the capture/encode path has worked on the current host. Credentials, certificates, API keys, and portal tokens under `~/.config/sunshine/credentials/` are intentionally not copied into this repository or this document.
+`~/.config/sunshine/sunshine.log` from 2026-09-07 records Sunshine 2026.516 on the headless display, WLR screencopy of `HEADLESS-1`, all three NVENC codecs, a full RDR2 client session (`start-steam-game.sh 1174180`), client disconnect, prep-cmd undo (`stop-steam-game.sh`), and the default sink returning to the AOC HDMI output. The current `sunshine-sink-restore` watchdog (started 14:26:02) logs "will restore default to: alsa_output.pci-0000_03_00.1.hdmi-stereo". Credentials, certificates, and tokens under `~/.config/sunshine/credentials/` are intentionally not copied into this repository or this document.
 
 ## Operational checks
 
-Run these from the real KDE user session (not a sandboxed shell):
+Run these from the real user session (e.g. the Hyprland desktop, not a sandboxed shell):
 
 ```bash
 systemctl --user status sway-sunshine.service sunshine-headless.service

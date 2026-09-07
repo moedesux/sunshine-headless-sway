@@ -133,6 +133,7 @@ Game audio is routed exclusively to the Moonlight stream without touching your h
 - `PULSE_SINK=sink-sunshine-stereo` is set in the Sway service environment, so apps launched in the headless session output to this sink
 - `audio_sink = sink-sunshine-stereo` in `sunshine.conf` tells Sunshine to capture from that sink
 - `restore-default-sink.sh` runs as a prep command to prevent Sunshine from hijacking your host's default audio sink — it starts a detached watchdog that restores the host sink you choose during `./install.sh` a few seconds after the stream ends and game audio stops
+- To change the preferred host sink later without reinstalling, run `~/.config/sway-sunshine/set-host-audio-sink.sh` (interactive, or pass a sink name; `--show` prints the current preference and default). It updates the recorded preference and applies it live — a watchdog already running for the current stream picks up the change on its next check
 - When Moonlight is backgrounded, game audio stays in the persistent null sink (silent) instead of reverting to your host speakers
 - Your main desktop audio continues through your normal output device
 
@@ -156,10 +157,11 @@ ls -la /sys/class/drm/card*/device/vendor  # 0x10de = NVIDIA, 0x1002 = AMD
 
 ### Wayland display numbering
 
-The headless Sway session typically gets `wayland-1` (assuming your main desktop is `wayland-0`). The install script detects this automatically. To check manually:
+The headless Sway session typically gets `wayland-1` (assuming your main desktop is `wayland-0`), but the number can change between boots — the running session records its actual display in `/run/user/<uid>/sway-sunshine-display`, which is the source of truth. To check manually:
 
 ```bash
 ls /run/user/$(id -u)/wayland-*
+cat /run/user/$(id -u)/sway-sunshine-display
 ```
 
 ### IPC socket
@@ -264,8 +266,18 @@ sudo apt install sway swaybg xdg-desktop-portal-wlr
 # Sway config and scripts
 mkdir -p ~/.config/sway-sunshine
 cp sway-sunshine/config ~/.config/sway-sunshine/
+cp sway-sunshine/publish-display.sh ~/.config/sway-sunshine/
 cp sway-sunshine/set-resolution.sh ~/.config/sway-sunshine/
 cp sway-sunshine/reset-resolution.sh ~/.config/sway-sunshine/
+cp sway-sunshine/restore-default-sink.sh ~/.config/sway-sunshine/
+cp sway-sunshine/set-host-audio-sink.sh ~/.config/sway-sunshine/
+cp sway-sunshine/start-steam-game.sh ~/.config/sway-sunshine/
+cp sway-sunshine/stop-steam-game.sh ~/.config/sway-sunshine/
+cp sway-sunshine/start-lutris-game.sh ~/.config/sway-sunshine/
+cp sway-sunshine/stop-lutris-game.sh ~/.config/sway-sunshine/
+cp sway-sunshine/start-heroic-game.sh ~/.config/sway-sunshine/
+cp sway-sunshine/stop-heroic-game.sh ~/.config/sway-sunshine/
+cp sway-sunshine/sway-wrapper.sh ~/.config/sway-sunshine/
 chmod +x ~/.config/sway-sunshine/*.sh
 
 # Sunshine config
@@ -321,7 +333,16 @@ sunshine-headless-sway/
 │   │   ├── config                  # Headless Sway compositor config (input isolation)
 │   │   ├── set-resolution.sh       # Dynamic resolution on connect
 │   │   ├── reset-resolution.sh     # Reset resolution on disconnect
-│   │   ├── restore-default-sink.sh # Prevents Sunshine from hijacking host audio
+│   │   ├── restore-default-sink.sh # Post-stream watchdog that restores host audio
+│   │   ├── set-host-audio-sink.sh  # Change the preferred host audio sink (no reinstall)
+│   │   ├── host-audio-sink         # Recorded host audio sink preference (pulse sink name)
+│   │   ├── publish-display.sh      # Re-publishes the real WAYLAND_DISPLAY after Sway binds
+│   │   ├── start-steam-game.sh     # Launch a Steam game in the headless session
+│   │   ├── stop-steam-game.sh      # Stop Steam (prep-cmd undo for Steam entries)
+│   │   ├── start-lutris-game.sh    # Launch a Lutris game in the headless session
+│   │   ├── stop-lutris-game.sh     # Stop Lutris (prep-cmd undo for Lutris entries)
+│   │   ├── start-heroic-game.sh    # Launch a Heroic game in the headless session
+│   │   ├── stop-heroic-game.sh     # Stop Heroic (prep-cmd undo for Heroic entries)
 │   │   └── sway-wrapper.sh         # PID-tracking wrapper for sway service
 │   ├── sunshine/
 │   │   ├── sunshine.conf           # Sunshine server config

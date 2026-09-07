@@ -274,9 +274,11 @@ sed "s|/run/user/1000/|/run/user/$USER_ID/|g" \
 sed "s|/run/user/1000/|/run/user/$USER_ID/|g" \
     "$SCRIPT_DIR/sway-sunshine/reset-resolution.sh" > "$SWAY_CONFIG_DIR/reset-resolution.sh"
 cp "$SCRIPT_DIR/sway-sunshine/restore-default-sink.sh" "$SWAY_CONFIG_DIR/restore-default-sink.sh"
+cp "$SCRIPT_DIR/sway-sunshine/set-host-audio-sink.sh" "$SWAY_CONFIG_DIR/set-host-audio-sink.sh"
 chmod +x "$SWAY_CONFIG_DIR/set-resolution.sh"
 chmod +x "$SWAY_CONFIG_DIR/reset-resolution.sh"
 chmod +x "$SWAY_CONFIG_DIR/restore-default-sink.sh"
+chmod +x "$SWAY_CONFIG_DIR/set-host-audio-sink.sh"
 
 # Steam scripts (WAYLAND_DISPLAY is resolved at runtime by the script itself)
 cp "$SCRIPT_DIR/sway-sunshine/start-steam-game.sh" "$SWAY_CONFIG_DIR/start-steam-game.sh"
