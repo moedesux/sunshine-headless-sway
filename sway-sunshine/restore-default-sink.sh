@@ -10,9 +10,18 @@
 #
 # This script runs as a Sunshine prep-cmd (do) at stream start. It starts a
 # detached watchdog (the sunshine-sink-restore user unit) that waits until the
-# stream is truly over — i.e. the default sink is still a sunshine sink AND
-# no application is actively (uncorked) playing audio into any sunshine sink —
-# then restores the preferred host sink.
+# stream is truly over before restoring the preferred host sink. "Truly over"
+# means ALL of:
+#   1. sunshine.log shows a CLIENT DISCONNECTED event that was logged after
+#      this watchdog started (i.e. after this stream's connect). This is the
+#      critical gate: without it, the watchdog fires during the long
+#      game-load window after connect — when there is no active playback yet
+#      — and flips the default sink mid-stream, leaking game audio to the
+#      host output.
+#   2. the default sink is still a sunshine sink, AND
+#   3. no application is actively (uncorked) playing audio into any sunshine
+#      sink (covers the brief tail where the game keeps playing after the
+#      client disconnects).
 #
 # The preferred host sink is recorded in ~/.config/sway-sunshine/host-audio-sink
 # (a single pulse sink name; written by install.sh, which asks the user which
@@ -27,12 +36,31 @@
 set -u
 
 PREF_FILE="${HOME}/.config/sway-sunshine/host-audio-sink"
+SUNSHINE_LOG="${HOME}/.config/sunshine/sunshine.log"
 MAX_WAIT_SECONDS=1800
 TICK_SECONDS=2
 
 # ── helpers ────────────────────────────────────────────────────────────────
 
 log() { echo "[restore-default-sink] $*"; }
+
+# Prints "<epoch> <state>" for the newest CLIENT CONNECTED/DISCONNECTED event
+# in the recent tail of sunshine.log; prints nothing if the log is missing or
+# contains no such event. The 1 MB tail comfortably covers the current
+# session (the log is small and Sunshine truncates/rotates it).
+last_client_event() {
+    local line ts state
+    line="$(tail -c 1048576 "$SUNSHINE_LOG" 2>/dev/null | grep -aiE 'CLIENT (CON|DIS)CONNECTED' | tail -n1)"
+    [ -n "$line" ] || return 0
+    if printf '%s\n' "$line" | grep -aqi 'CLIENT DISCONNECTED'; then
+        state=disconnected
+    else
+        state=connected
+    fi
+    ts="$(printf '%s\n' "$line" | sed -nE 's/^\[([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?)\].*/\1/p')"
+    [ -n "$ts" ] || return 0
+    printf '%s %s\n' "$(date -d "$ts" +%s 2>/dev/null || true)" "$state"
+}
 
 default_sink_name() {
     pactl info 2>/dev/null | awk -F': ' '/^Default Sink:/{print $2; exit}'
@@ -83,7 +111,9 @@ resolve_host_sink() {
 
 run_watchdog() {
     local host_sink cur waited=0 target
+    local start_epoch ev last_epoch="" last_state="" logged_connect=""
     host_sink="$(resolve_host_sink)" || host_sink=""
+    start_epoch="$(date +%s)"
     if [ -n "$host_sink" ]; then
         log "watchdog started; will restore default to: $host_sink"
     else
@@ -101,6 +131,32 @@ run_watchdog() {
             *sunshine*) ;;
             *) continue ;;
         esac
+
+        # Gate on Sunshine's own client state: only restore once this
+        # session's client has actually disconnected. During the game-load
+        # window after connect there is no playback yet, so the playback
+        # check below would pass too early and flip the default mid-stream.
+        ev="$(last_client_event)"
+        if [ -n "$ev" ]; then
+            last_epoch="${ev%% *}"
+            last_state="${ev##* }"
+        else
+            last_epoch=""
+            last_state=""
+        fi
+        case "$last_epoch" in
+            ''|*[!0-9]*)
+                # No parseable client event in the log tail yet — wait.
+                continue
+                ;;
+        esac
+        if [ "$last_state" != "disconnected" ] || [ "$last_epoch" -le "$start_epoch" ]; then
+            if [ "$last_state" = "connected" ] && [ -z "$logged_connect" ]; then
+                log "client connected (per sunshine.log); waiting for disconnect"
+                logged_connect=1
+            fi
+            continue
+        fi
 
         # Wait until stream audio is truly over: the game's (or any app's)
         # sink input stays alive a moment after the client disconnects.
