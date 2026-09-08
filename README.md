@@ -130,12 +130,24 @@ The Sway service uses `WLR_RENDERER=gles2` by default for maximum compatibility.
 Game audio is routed exclusively to the Moonlight stream without touching your host audio:
 
 - A persistent PipeWire null sink (`sink-sunshine-stereo`) is created via config drop-in — it always exists, even when Moonlight is disconnected or backgrounded
-- `PULSE_SINK=sink-sunshine-stereo` is set in the Sway service environment, so apps launched in the headless session output to this sink
+- The Sway audio service drop-in assigns `sink-sunshine-stereo` to PulseAudio and native PipeWire applications. Routing properties prevent saved moves, default changes, or a missing sink from sending game audio to desktop speakers
 - `audio_sink = sink-sunshine-stereo` in `sunshine.conf` tells Sunshine to capture from that sink
-- `restore-default-sink.sh` runs as a prep command to prevent Sunshine from hijacking your host's default audio sink — it starts a detached watchdog that restores the host sink you choose during `./install.sh` a few seconds after the stream ends and game audio stops
-- To change the preferred host sink later without reinstalling, run `~/.config/sway-sunshine/set-host-audio-sink.sh` (interactive, or pass a sink name; `--show` prints the current preference and default). It updates the recorded preference and applies it live — a watchdog already running for the current stream picks up the change on its next check
+- A WirePlumber 0.5 policy excludes Sunshine sinks before desktop default selection. Sunshine's requests to change the default preserve your current physical output, including AOC or Bluetooth headphones. Its recording stream is pinned too
+- `restore-default-sink.sh` remains as a compatibility prep hook that stops obsolete watchdogs. No delayed default-sink restoration is needed
+- To change the host sink, use your normal desktop audio controls or `~/.config/sway-sunshine/set-host-audio-sink.sh` (interactive, or pass a sink name). This remains safe during a stream
 - When Moonlight is backgrounded, game audio stays in the persistent null sink (silent) instead of reverting to your host speakers
 - Your main desktop audio continues through your normal output device
+
+For an existing installation, `./install.sh --audio-only` installs the audio
+policy and service drop-ins without changing display configuration or the app
+catalog. End the stream, then restart `wireplumber`, `sway-sunshine`, and
+`sunshine-headless` user services. The normal installer also installs this policy.
+
+During a Big Walk stream, run `python3 tests/check-audio-isolation.py` to check
+desktop playback, game playback, and Sunshine's recording destination. The
+desktop probe generates digital silence. Use `--game-name` for another game's
+PulseAudio application name. See [the regression investigation](docs/audio-isolation-2026-09.md)
+for the reproduced failure and validation.
 
 ### Dynamic resolution
 
@@ -236,9 +248,11 @@ sudo udevadm trigger --subsystem-match=input
 ### Audio bleeds to host
 
 - Verify `audio_sink = sink-sunshine-stereo` is in `~/.config/sunshine/sunshine.conf`
-- Check `PULSE_SINK=sink-sunshine-stereo` is in `sway-sunshine.service`
-- Verify the `restore-default-sink.sh` prep command is in `apps.json` — without it, Sunshine sets `sink-sunshine-stereo` as the system-wide default, routing all host audio into the stream
-- Confirm your default sink after connecting: `wpctl status | grep '\*'`
+- Verify the audio-routing drop-ins exist under `~/.config/systemd/user/sway-sunshine.service.d/` and `sunshine-headless.service.d/`
+- Verify the WirePlumber policy exists under `~/.config/wireplumber/wireplumber.conf.d/` and the script under `~/.local/share/wireplumber/scripts/`
+- Run `python3 tests/check-audio-isolation.py --game-name 'Big Walk.exe'`
+- Confirm the desktop default remains AOC or AirPods while connected; the game should target `sink-sunshine-stereo` and Sunshine should capture `sink-sunshine-stereo.monitor`
+- If the TV has video but no audio, set Moonlight's TV audio configuration to Stereo and reconnect. Sunshine follows the channel count requested by the client; this host-side routing fix cannot correct a TV client that drops the front stereo channels of a surround stream
 
 ### UPnP port mapping failures
 
@@ -287,19 +301,29 @@ cp sunshine/apps.json ~/.config/sunshine/apps.json
 # PipeWire persistent audio sink
 mkdir -p ~/.config/pipewire/pipewire.conf.d
 cp pipewire/sunshine-null-sink.conf ~/.config/pipewire/pipewire.conf.d/
-systemctl --user restart pipewire.service
+
+# WirePlumber default-selection policy
+mkdir -p ~/.config/wireplumber/wireplumber.conf.d ~/.local/share/wireplumber/scripts
+cp pipewire/sunshine-host-default.conf ~/.config/wireplumber/wireplumber.conf.d/
+cp pipewire/sunshine-host-default.lua ~/.local/share/wireplumber/scripts/
 
 # Systemd services
-mkdir -p ~/.config/systemd/user
+mkdir -p ~/.config/systemd/user/sway-sunshine.service.d
+mkdir -p ~/.config/systemd/user/sunshine-headless.service.d
 cp systemd/sway-sunshine.service ~/.config/systemd/user/
 cp systemd/sunshine-headless.service ~/.config/systemd/user/
+cp systemd/sway-audio-routing.conf ~/.config/systemd/user/sway-sunshine.service.d/audio-routing.conf
+cp systemd/sunshine-audio-routing.conf ~/.config/systemd/user/sunshine-headless.service.d/audio-routing.conf
+
+systemctl --user restart pipewire.service wireplumber.service
+systemctl --user daemon-reload
 ```
 
 ### 3. Edit paths
 
 Update the following in the copied files to match your system:
 
-- `sunshine-headless.service`: set `ExecStart` to your Sunshine path, `WAYLAND_DISPLAY` to your headless display
+- `sunshine-headless.service`: set `ExecStart` to your Sunshine path; keep `WAYLAND_DISPLAY` file-driven through its `EnvironmentFile`
 - `sway-sunshine.service`: update `/run/user/1000/` to `/run/user/$(id -u)/` if your UID isn't 1000, set `WLR_DRM_DEVICES` to the correct render node
 - `sunshine.conf`: set `adapter_name` to match the render node in `WLR_DRM_DEVICES`
 - `apps.json`: update `/home/YOUR_USER/` to your home directory
@@ -329,11 +353,13 @@ sunshine-headless-sway/
 ├── ~/.config/
 │   ├── pipewire/pipewire.conf.d/
 │   │   └── sunshine-null-sink.conf # Persistent audio sink (survives disconnect)
+│   ├── wireplumber/
+│   │   └── wireplumber.conf.d/sunshine-host-default.conf
 │   ├── sway-sunshine/
 │   │   ├── config                  # Headless Sway compositor config (input isolation)
 │   │   ├── set-resolution.sh       # Dynamic resolution on connect
 │   │   ├── reset-resolution.sh     # Reset resolution on disconnect
-│   │   ├── restore-default-sink.sh # Post-stream watchdog that restores host audio
+│   │   ├── restore-default-sink.sh # Compatibility hook; policy preserves host audio live
 │   │   ├── set-host-audio-sink.sh  # Change the preferred host audio sink (no reinstall)
 │   │   ├── host-audio-sink         # Recorded host audio sink preference (pulse sink name)
 │   │   ├── publish-display.sh      # Re-publishes the real WAYLAND_DISPLAY after Sway binds
@@ -344,6 +370,8 @@ sunshine-headless-sway/
 │   │   ├── start-heroic-game.sh    # Launch a Heroic game in the headless session
 │   │   ├── stop-heroic-game.sh     # Stop Heroic (prep-cmd undo for Heroic entries)
 │   │   └── sway-wrapper.sh         # PID-tracking wrapper for sway service
+├── ~/.local/share/wireplumber/
+│   └── scripts/sunshine-host-default.lua
 │   ├── sunshine/
 │   │   ├── sunshine.conf           # Sunshine server config
 │   │   └── apps.json               # Game/app entries for Moonlight

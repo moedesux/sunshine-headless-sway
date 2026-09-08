@@ -4,8 +4,7 @@
 # re-running ./install.sh.
 #
 # The preferred sink is recorded in ~/.config/sway-sunshine/host-audio-sink
-# (a single pulse sink name) and is what restore-default-sink.sh's watchdog
-# restores the system default to after a stream. This script updates that
+# (a single pulse sink name) for subsequent installer runs. This script updates that
 # file AND applies the choice live via `pactl set-default-sink` (which also
 # persists it in WirePlumber's default-nodes state).
 #
@@ -19,9 +18,7 @@
 #
 # Safe to run during an active stream: it only touches the preference file
 # and the system default sink. In-stream game audio is pinned to
-# sink-sunshine-stereo via PULSE_SINK and is unaffected. A watchdog already
-# running for the current stream re-reads the preference file on every check,
-# so a mid-stream change is picked up without restarting anything.
+# sink-sunshine-stereo by the Sway audio-routing service drop-in and is unaffected.
 
 set -u
 
@@ -59,7 +56,7 @@ fi
 if [ "${1:-}" = "--show" ]; then
     pref="$(saved_preference)"
     cur="$(current_default_sink)"
-    [ -n "$pref" ] || pref="<none — watchdog falls back to first non-sunshine sink>"
+    [ -n "$pref" ] || pref="<none — using the desktop's current default>"
     [ -n "$cur" ] || cur="<none>"
     echo "Recorded preference:  $pref"
     echo "Current default sink: $cur"
@@ -87,7 +84,7 @@ if [ -z "$TARGET" ]; then
 
     pref="$(saved_preference)"
     cur="$(current_default_sink)"
-    [ -n "$pref" ] || pref="<none — watchdog falls back to first non-sunshine sink>"
+    [ -n "$pref" ] || pref="<none — using the desktop's current default>"
     echo "Recorded preference:  $pref"
     echo "Current default sink: ${cur:-<none>}"
     echo ""
@@ -122,7 +119,7 @@ fi
 
 if pactl set-default-sink "$TARGET" 2>/dev/null; then
     echo "Set default audio sink:   $TARGET"
-    echo "Done — the post-stream watchdog will now restore this sink."
+    echo "Done — this is now the preferred physical desktop sink."
 else
     die "failed to set default sink to '$TARGET' (the preference file was already updated)"
 fi

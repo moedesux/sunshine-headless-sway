@@ -9,6 +9,33 @@ SUNSHINE_CONFIG_DIR="$HOME/.config/sunshine"
 SYSTEMD_DIR="$HOME/.config/systemd/user"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+install_audio_policy() {
+    local wp_dir="$HOME/.config/wireplumber"
+    local wp_scripts="${XDG_DATA_HOME:-$HOME/.local/share}/wireplumber/scripts"
+    mkdir -p "$SWAY_CONFIG_DIR" "$wp_scripts" "$wp_dir/wireplumber.conf.d" \
+        "$SYSTEMD_DIR/sway-sunshine.service.d" "$SYSTEMD_DIR/sunshine-headless.service.d"
+    cp "$SCRIPT_DIR/pipewire/sunshine-host-default.lua" "$wp_scripts/"
+    # Remove the obsolete config-directory copy from early audio-policy installs.
+    rm -f "$wp_dir/scripts/sunshine-host-default.lua"
+    cp "$SCRIPT_DIR/pipewire/sunshine-host-default.conf" "$wp_dir/wireplumber.conf.d/"
+    cp "$SCRIPT_DIR/systemd/sway-audio-routing.conf" "$SYSTEMD_DIR/sway-sunshine.service.d/audio-routing.conf"
+    cp "$SCRIPT_DIR/systemd/sunshine-audio-routing.conf" "$SYSTEMD_DIR/sunshine-headless.service.d/audio-routing.conf"
+    cp "$SCRIPT_DIR/sway-sunshine/restore-default-sink.sh" "$SWAY_CONFIG_DIR/"
+    cp "$SCRIPT_DIR/sway-sunshine/set-host-audio-sink.sh" "$SWAY_CONFIG_DIR/"
+    chmod +x "$SWAY_CONFIG_DIR/restore-default-sink.sh"
+    chmod +x "$SWAY_CONFIG_DIR/set-host-audio-sink.sh"
+    systemctl --user stop sunshine-sink-restore.service 2>/dev/null || true
+}
+
+# Deploy audio changes without touching display sockets, GPU settings or apps.
+# Restart consumers separately, after ending any stream.
+if [ "${1:-}" = "--audio-only" ]; then
+    install_audio_policy
+    systemctl --user daemon-reload
+    echo "Audio policy installed. Restart wireplumber, sway-sunshine and sunshine-headless after ending the stream."
+    exit 0
+fi
+
 echo "=== Headless Sway + Sunshine Installer ==="
 echo ""
 
@@ -204,11 +231,9 @@ if [ -z "$HEADLESS_DISPLAY" ]; then
 fi
 
 # ─── Host audio sink preference ─────────────────────────────────────────────
-# Sunshine points the system default audio sink at its null capture sink
-# (sink-sunshine-stereo) while a client is connected and does not restore the
-# previous default afterwards. The sink chosen here is recorded and used by
-# restore-default-sink.sh to return audio to the user's real output after a
-# stream. Re-run ./install.sh after changing monitors to re-record the choice.
+# Record the preferred physical desktop output for installer checks and manual
+# changes. WirePlumber policy preserves the live default during streams.
+# Re-run ./install.sh after changing monitors to re-record the choice.
 echo ""
 echo "Configuring host audio sink preference..."
 mkdir -p "$SWAY_CONFIG_DIR"
@@ -273,12 +298,8 @@ sed "s|/run/user/1000/|/run/user/$USER_ID/|g" \
     "$SCRIPT_DIR/sway-sunshine/set-resolution.sh" > "$SWAY_CONFIG_DIR/set-resolution.sh"
 sed "s|/run/user/1000/|/run/user/$USER_ID/|g" \
     "$SCRIPT_DIR/sway-sunshine/reset-resolution.sh" > "$SWAY_CONFIG_DIR/reset-resolution.sh"
-cp "$SCRIPT_DIR/sway-sunshine/restore-default-sink.sh" "$SWAY_CONFIG_DIR/restore-default-sink.sh"
-cp "$SCRIPT_DIR/sway-sunshine/set-host-audio-sink.sh" "$SWAY_CONFIG_DIR/set-host-audio-sink.sh"
 chmod +x "$SWAY_CONFIG_DIR/set-resolution.sh"
 chmod +x "$SWAY_CONFIG_DIR/reset-resolution.sh"
-chmod +x "$SWAY_CONFIG_DIR/restore-default-sink.sh"
-chmod +x "$SWAY_CONFIG_DIR/set-host-audio-sink.sh"
 
 # Steam scripts (WAYLAND_DISPLAY is resolved at runtime by the script itself)
 cp "$SCRIPT_DIR/sway-sunshine/start-steam-game.sh" "$SWAY_CONFIG_DIR/start-steam-game.sh"
@@ -508,6 +529,8 @@ PIPEWIRE_DIR="$HOME/.config/pipewire/pipewire.conf.d"
 mkdir -p "$PIPEWIRE_DIR"
 cp "$SCRIPT_DIR/pipewire/sunshine-null-sink.conf" "$PIPEWIRE_DIR/sunshine-null-sink.conf"
 echo "Installed PipeWire persistent audio sink"
+install_audio_policy
+systemctl --user restart wireplumber.service
 
 # udev rule: install DE-appropriate input isolation rule
 # NOTE: This requires sudo. Running it manually ensures you control the action.

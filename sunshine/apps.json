@@ -11,7 +11,7 @@
       "prep-cmd": [
         {
           "do": "/home/YOUR_USER/.config/sway-sunshine/restore-default-sink.sh",
-          "undo": "/home/moe/.config/sway-sunshine/restore-default-sink.sh"
+          "undo": ""
         },
         {
           "do": "/home/YOUR_USER/.config/sway-sunshine/set-resolution.sh",
@@ -25,7 +25,7 @@
       "prep-cmd": [
         {
           "do": "/home/YOUR_USER/.config/sway-sunshine/restore-default-sink.sh",
-          "undo": "/home/moe/.config/sway-sunshine/restore-default-sink.sh"
+          "undo": ""
         },
         {
           "do": "/home/YOUR_USER/.config/sway-sunshine/set-resolution.sh",
@@ -41,7 +41,7 @@
       "prep-cmd": [
         {
           "do": "/home/YOUR_USER/.config/sway-sunshine/restore-default-sink.sh",
-          "undo": "/home/moe/.config/sway-sunshine/restore-default-sink.sh"
+          "undo": ""
         },
         {
           "do": "/home/YOUR_USER/.config/sway-sunshine/set-resolution.sh",
@@ -58,7 +58,7 @@
       "prep-cmd": [
         {
           "do": "/home/YOUR_USER/.config/sway-sunshine/restore-default-sink.sh",
-          "undo": "/home/moe/.config/sway-sunshine/restore-default-sink.sh"
+          "undo": ""
         },
         {
           "do": "/home/YOUR_USER/.config/sway-sunshine/set-resolution.sh",
@@ -75,7 +75,7 @@
       "prep-cmd": [
         {
           "do": "/home/YOUR_USER/.config/sway-sunshine/restore-default-sink.sh",
-          "undo": "/home/moe/.config/sway-sunshine/restore-default-sink.sh"
+          "undo": ""
         },
         {
           "do": "/home/YOUR_USER/.config/sway-sunshine/set-resolution.sh",
@@ -92,7 +92,7 @@
       "prep-cmd": [
         {
           "do": "/home/YOUR_USER/.config/sway-sunshine/restore-default-sink.sh",
-          "undo": "/home/moe/.config/sway-sunshine/restore-default-sink.sh"
+          "undo": ""
         },
         {
           "do": "/home/YOUR_USER/.config/sway-sunshine/set-resolution.sh",

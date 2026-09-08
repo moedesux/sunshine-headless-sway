@@ -695,7 +695,7 @@ Gotchas:
 
 The Sway config disables physical outputs, enables `HEADLESS-1` (1920x1080@60 + 3840x2160@120 advertised); prep commands change the mode to the client's requested resolution/fps and reset to 1080p60 on disconnect. All physical input is disabled; Sunshine's virtual keyboard/mouse/touch/pen/gamepad devices are enabled explicitly.
 
-The live `apps.json` is Sunshine v2 with 13 entries, all following the standard pattern: `restore-default-sink.sh` (do) + `set-resolution.sh` (do) with a launcher-appropriate undo — `stop-steam-game.sh` / `stop-lutris-game.sh` for games, `reset-resolution.sh` for the desktop entry. Games launch via the detached helpers: Lutris IDs 10, 14, 15, 16, 18, 19, 20, 21; Steam appids 110800, 1174180, 3130330 and Big Picture. (The old `xrandr`/`HDMI-1` desktop entry is gone — "Low Res Desktop" now uses the standard swaymsg-based resolution pair.)
+The live `apps.json` is Sunshine v2 with 14 entries. Each retains the compatibility `restore-default-sink.sh` do hook and the standard resolution/launcher cleanup hooks. Verify current entries from the live JSON instead of caching its game list here.
 
 The launcher scripts resolve `WAYLAND_DISPLAY` at runtime from the display file (falling back to `wayland-1`); resolution scripts use the install-time-templated `/run/user/<uid>` paths. If the headless socket changes, update source templates and redeploy rather than editing `~/.config` manually. Steam/Lutris/Heroic helpers intentionally terminate all matching processes system-wide before launching in headless Sway.
 
