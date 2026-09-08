@@ -142,15 +142,9 @@ Called by Sunshine as a **prep-cmd.do** when a client connects. Uses `swaymsg` t
 Called by Sunshine as a **prep-cmd.undo** when a client disconnects. Resets headless output to 1920x1080@60Hz.
 
 ### `restore-default-sink.sh`
-Restores the host's default audio sink after a Sunshine stream ends. Sunshine points the system default sink at `sink-sunshine-stereo` while a client is connected and does NOT restore it on disconnect. This script runs as a **prep-cmd (do)** at stream start: it stops any stale `sunshine-sink-restore` unit and starts a fresh detached watchdog via `systemd-run --user --no-block --unit=sunshine-sink-restore "$0" --watchdog`.
-
-The watchdog polls every 2s (up to 30 min) and restores the default when **both** hold:
-- the current default sink name still contains "sunshine", and
-- no sink input is actively (uncorked) playing into any sunshine sink (so a game that is still running after the client disconnects keeps its audio in the stream until it stops).
-
-It restores with `pactl set-default-sink <name>` (name-based, not volatile IDs), which also persists the choice in WirePlumber's `default-nodes` state, so the host sink survives restarts. The preferred sink name is read from `~/.config/sway-sunshine/host-audio-sink` (written by install.sh); if that sink no longer exists it falls back to the first available non-sunshine sink. Watchdog log: `journalctl --user -u sunshine-sink-restore`.
-
-Note: sink inputs are matched to sunshine sinks by pulse **index** (`pactl list sinks short`), because this distro's `pactl list sink-inputs` reports `Sink: <index>`, not the sink name.
+Compatibility prep hook for existing `apps.json` entries. It stops any obsolete
+`sunshine-sink-restore` unit; WirePlumber preserves the physical desktop
+default during the stream, so no delayed restore or watchdog is used.
 
 ### `set-host-audio-sink.sh`
 Changes the preferred host audio sink **without re-running `./install.sh`**:
@@ -161,7 +155,10 @@ set-host-audio-sink.sh <sink-name>  # apply a specific sink (exact name from `pa
 set-host-audio-sink.sh --show       # print recorded preference + current default; changes nothing
 ```
 
-Applying does two things: writes the name to `~/.config/sway-sunshine/host-audio-sink` (the preference consumed by `restore-default-sink.sh`), then applies it live with `pactl set-default-sink <name>` (which also persists in WirePlumber's `default-nodes` state). It rejects non-existent names and Sunshine's own sinks, and exits non-zero with a message on invalid input. It is safe to run during an active stream (in-stream game audio is pinned to the null sink via `PULSE_SINK`), and the already-running `sunshine-sink-restore` watchdog re-reads the preference file on every check, so a mid-stream change is picked up without a restart.
+Applying writes the name to `~/.config/sway-sunshine/host-audio-sink` for
+subsequent installer checks and applies it live with `pactl set-default-sink
+<name>`. It rejects missing sinks and Sunshine sinks. It is safe during a
+stream because game audio is pinned by the Sway routing drop-in.
 
 > **Note:** `set-host-audio-sink.sh` is automatically installed by `install.sh` (plain `cp` + `chmod +x`, alongside `restore-default-sink.sh`).
 
@@ -314,14 +311,81 @@ Runner types:
 
 ## Audio Troubleshooting
 
-### Game silent on TV (video OK, audio path connected)
-If the game is playing into `sink-sunshine-stereo`, Sunshine is encoding Opus, but the TV is silent, check the **WirePlumber per-app stream volume**. WirePlumber persists per-app volumes in `~/.local/state/wireplumber/stream-properties` (not JSON; app names escape spaces as `\s`) and restores them on every launch. A stale near-zero value survives reboots and re-launches — e.g. `channelVolumes: [0.001119]` ≈ **−59 dB** (these are linear ratios: 1.0 = 0 dB, 0.001 ≈ −60 dB).
+### Game silent on TV (video OK)
+First run the isolation check below. If routing passes and the TV is still
+silent, set the TV's Moonlight audio configuration to **Stereo**, then fully
+disconnect and reconnect. Big Walk produced stereo while the TV requested 7.1;
+the host sent valid surround packets, but this TV path dropped usable stereo
+playback. Keep Moonlight on Stereo unless the TV/audio system is known to
+handle the requested surround layout.
 
-- Check: `wpctl status` shows each stream's volume; or grep the state file for the escaped game name.
-- Fix: `wpctl set-volume <stream-id> 100%` — updates live state and re-persists automatically (verified: the state file is rewritten with `channelVolumes: [1.000000, 1.000000]`).
+### Audio routes to the wrong device
+Verify `audio_sink = sink-sunshine-stereo` in `sunshine.conf`, both audio
+systemd drop-ins, and the WirePlumber policy. Run the isolation check while the
+stream is active. Do not restore the desktop default from a stream hook; use
+`set-host-audio-sink.sh` to change the preferred physical sink.
 
-### Default sink stuck on `sink-sunshine-stereo` after a stream
-`restore-default-sink.sh`'s watchdog restores the host sink (see above) a few seconds after the stream and game audio stop. If it is still stuck: check `journalctl --user -u sunshine-sink-restore`, verify `~/.config/sway-sunshine/host-audio-sink` holds an existing sink name (`pactl list sinks short`), and restore manually with `pactl set-default-sink <name>` (persists in WirePlumber's `default-nodes` state) — or run `~/.config/sway-sunshine/set-host-audio-sink.sh` to fix both the live default and the recorded preference in one step.
+## September 2026 audio isolation regression
+
+The first Big Walk report was a routing failure, not a missing game signal.
+Sunshine requested `sink-sunshine-stereo` as the shared PulseAudio default.
+`PULSE_SINK` only selects an initial target; WirePlumber's follow-default
+policy could move both existing and new playback streams, including Sunshine's
+recording from a sink monitor. Restoring AOC HDMI-0 during the stream therefore
+moved Big Walk audio to the PC and made Sunshine capture desktop audio. A
+second contributor was deployment drift: the live restore script was an older
+branch copy, so source changes were not reflected in `~/.config`.
+
+The final fix is synchronous policy enforcement:
+
+- `pipewire/sunshine-host-default.lua` removes `sink-sunshine-*` from
+  WirePlumber's default candidates before selection and preserves the current
+  physical default (AOC HDMI-0 or AirPods) when Sunshine requests its sink.
+- `systemd/sway-audio-routing.conf` pins Sway's PulseAudio and native PipeWire
+  clients to `sink-sunshine-stereo` with `node.dont-move=true`,
+  `node.dont-fallback=true`, and `state.restore-target=false`.
+- `systemd/sunshine-audio-routing.conf` applies the same move/fallback guards
+  to Sunshine's recording client. `sunshine.conf` keeps
+  `audio_sink = sink-sunshine-stereo`, and the persistent PipeWire null sink
+  remains the capture source.
+- `restore-default-sink.sh` remains only for compatibility with existing
+  prep-cmd entries and retires old watchdog units. The watchdog is not part of
+  the isolation design.
+
+Deploy repository changes with `./install.sh`. For an existing installation
+that only needs this policy, run `./install.sh --audio-only` after ending any
+stream, then run:
+
+```bash
+systemctl --user restart wireplumber.service sway-sunshine.service sunshine-headless.service
+```
+
+This installs the WirePlumber script and component config plus both systemd
+drop-ins without changing display or app configuration.
+
+Validate during a Big Walk stream with:
+
+```bash
+python3 tests/check-audio-isolation.py --game-name 'Big Walk.exe'
+```
+
+The check must report `PASS`; the host default must remain a physical sink,
+Big Walk must target `sink-sunshine-stereo`, and Sunshine must capture
+`sink-sunshine-stereo.monitor`.
+
+Future maintenance rules:
+
+- Edit repository sources and deploy through `install.sh`; do not hand-edit
+  live WirePlumber, systemd, PipeWire, or Sunshine copies.
+- Keep sink names, not volatile sink indices, in the host preference. Use
+  `set-host-audio-sink.sh` when switching between AOC HDMI-0 and AirPods.
+- Run the validation after PipeWire, WirePlumber, Sunshine, or Moonlight
+  upgrades, including AOC/AirPods selection, reconnects, and a native desktop
+  PipeWire stream.
+- Keep explicit game and capture targets pinned. Preserve the preselection
+  WirePlumber policy; do not reintroduce polling or post-stream default flips.
+- When TV video works but audio is silent, check Moonlight Stereo before
+  changing host routing. Keep test volumes at or below 5%.
 
 ## install.sh Behavior
 
@@ -336,7 +400,8 @@ The install script:
 - Auto-detects the Wayland display number for the headless session. It no longer trusts the value in the installed service file (that was the bug: it kept the stale `wayland-1` forever). Instead it first tries to **reuse the recorded display file** (`/run/user/$USER_ID/sway-sunshine-display`) only if that socket is currently free; otherwise it **auto-detects the next free number** after the highest existing `wayland-*` socket (with `wayland-1` as the default when no sockets are present)
 - No longer templates `WAYLAND_DISPLAY` into the service files: `sway-sunshine.service` carries no hardcoded display (Sway binds whatever socket is free, and `publish-display.sh` records the real value), while `sunshine-headless.service` reads it via `EnvironmentFile=-/run/user/%U/sway-sunshine-display`
 - Installs the launcher scripts (`start-steam-game.sh`, `start-lutris-game.sh`, `start-heroic-game.sh`) with plain `cp` rather than sed-templating, since each script resolves `WAYLAND_DISPLAY` at runtime from the display file
-- Records the **host audio sink preference**: asks which non-sunshine sink is the main desktop output (lists candidates with the current default marked, defaults to it) and writes the chosen pulse sink name to `~/.config/sway-sunshine/host-audio-sink`. Reuses the saved name if that sink still exists (so it only re-asks after a monitor change); in non-interactive mode falls back to the current default, then the first available sink. Used by `restore-default-sink.sh` to return audio to the right output after a stream. To change it later without reinstalling, use `~/.config/sway-sunshine/set-host-audio-sink.sh` (installed by this script)
+- Records the **host audio sink preference**: asks which physical desktop output is preferred (AOC HDMI-0 or AirPods when connected), stores its stable sink name in `~/.config/sway-sunshine/host-audio-sink`, and reuses it while it exists. WirePlumber preserves the live physical default during streams; `set-host-audio-sink.sh` changes the preference and live output without reinstalling.
+- Installs the WirePlumber 0.5 default-selection policy and the Sway/Sunshine systemd audio-routing drop-ins. `./install.sh --audio-only` deploys only this audio policy and compatibility hooks for an existing installation; restart the three user services after ending the stream.
 - Replaces the `ExecStart` line in `sunshine-headless.service` **wholesale** with the detected Sunshine path — note this drops the template's `/usr/bin/sg input -c` wrapper, so live units run `/usr/bin/sunshine` directly. If input-group access is ever needed, re-add the wrapper in the template deliberately
 
 ## KDE Plasma Wayland Compatibility (Updated 2026-04-25)
@@ -614,10 +679,16 @@ adapter_name = /dev/dri/renderD129
 
 Capture is WLR screencopy from Sway; the 2026-09-07 log shows `h264_nvenc`, `hevc_nvenc`, and `av1_nvenc` available and a successful capture of `HEADLESS-1`.
 
-Audio: PipeWire creates the null sink `sink-sunshine-stereo` (from `pipewire/sunshine-null-sink.conf`); Sunshine selects it on connect. The host audio preference in `~/.config/sway-sunshine/host-audio-sink` is `alsa_output.pci-0000_03_00.1.hdmi-stereo` — the AOC 32G2WG3 monitor speakers (NVIDIA GB202 HDA "HDMI 0"; the monitor is cabled to NVIDIA DP-11 even though the desktop scan-outs via PRIME). The `sunshine-sink-restore` watchdog restores it after a stream, and `set-host-audio-sink.sh` changes the preference at runtime.
+Audio: PipeWire creates the persistent null sink `sink-sunshine-stereo` from
+`pipewire/sunshine-null-sink.conf`; Sunshine captures its monitor. The
+WirePlumber policy keeps the physical desktop default (AOC HDMI-0 or AirPods)
+while the Sway and Sunshine systemd drop-ins pin stream targets and disable
+move/fallback restoration. `set-host-audio-sink.sh` changes the preferred
+physical sink at runtime.
 
 Gotchas:
-- `pactl list sinks short` currently orders the sinks `sink-sunshine-stereo`, `alsa_output.pci-0000_c2_00.6.analog-stereo` (ALC623 jack), `alsa_output.pci-0000_03_00.1.hdmi-stereo` (AOC). The watchdog's **fallback** (first non-sunshine sink) is therefore the analog jack, *not* the AOC — the preference file is what keeps the restore on the right device. Deleting `host-audio-sink` degrades post-stream restore to the headphone jack; sink indices are volatile, names are the stable key.
+- Sink indices are volatile; use the recorded sink name in
+  `~/.config/sway-sunshine/host-audio-sink` when selecting AOC or AirPods.
 - The user's WirePlumber drop-in `~/.config/wireplumber/wireplumber.conf.d/50-rename-hdmi-sink.conf` mislabels the AMD iGPU's display-audio card as "AOC 32G2WG3 (HDMI)" — stale and misleading; don't touch it unless asked.
 
 ### Sway output, input, and game launch
@@ -630,7 +701,9 @@ The launcher scripts resolve `WAYLAND_DISPLAY` at runtime from the display file 
 
 ### Verified streaming evidence
 
-`~/.config/sunshine/sunshine.log` from 2026-09-07 records Sunshine 2026.516 on the headless display, WLR screencopy of `HEADLESS-1`, all three NVENC codecs, a full RDR2 client session (`start-steam-game.sh 1174180`), client disconnect, prep-cmd undo (`stop-steam-game.sh`), and the default sink returning to the AOC HDMI output. The current `sunshine-sink-restore` watchdog (started 14:26:02) logs "will restore default to: alsa_output.pci-0000_03_00.1.hdmi-stereo". Credentials, certificates, and tokens under `~/.config/sunshine/credentials/` are intentionally not copied into this repository or this document.
+The 2026-09-07 Sunshine log records a successful headless WLR capture and
+NVENC session. Validate current audio routing with the regression command in
+the September 2026 section; logs alone do not prove stream isolation.
 
 ## Operational checks
 
