@@ -24,8 +24,8 @@ SimpleEventHook {
     end
     event:set_data ("available-nodes", Json.Array (host_nodes))
 
-    -- Sunshine's default request must not discard the current AOC/Bluetooth
-    -- choice in favour of a different physical device with a higher priority.
+    -- Sunshine's default request must not discard the current physical-output
+    -- choice in favour of a different device with a higher priority.
     -- Repair configured metadata before any effective default is published.
     local kind = event:get_properties ()["default-node.type"]
     if kind ~= "audio.sink" then return end

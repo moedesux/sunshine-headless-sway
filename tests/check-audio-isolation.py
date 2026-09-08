@@ -49,7 +49,10 @@ def check(game_name):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--game-name", default="Big Walk.exe")
+    parser.add_argument(
+        "--game-name", required=True,
+        help="PulseAudio application.name of the streamed game",
+    )
     args = parser.parse_args()
     probe = subprocess.Popen([
         "paplay", "--raw", "--rate=48000", "--channels=2", "--volume=0",

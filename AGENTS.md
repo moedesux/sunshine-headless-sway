@@ -311,13 +311,11 @@ Runner types:
 
 ## Audio Troubleshooting
 
-### Game silent on TV (video OK)
-First run the isolation check below. If routing passes and the TV is still
-silent, set the TV's Moonlight audio configuration to **Stereo**, then fully
-disconnect and reconnect. Big Walk produced stereo while the TV requested 7.1;
-the host sent valid surround packets, but this TV path dropped usable stereo
-playback. Keep Moonlight on Stereo unless the TV/audio system is known to
-handle the requested surround layout.
+### Game silent on client (video OK)
+First run the isolation check below. If routing passes and the client is still
+silent, try the client's Moonlight audio configuration set to **Stereo**, then
+fully disconnect and reconnect. Host routing cannot correct a client-side
+channel-layout incompatibility.
 
 ### Audio routes to the wrong device
 Verify `audio_sink = sink-sunshine-stereo` in `sunshine.conf`, both audio
@@ -327,12 +325,12 @@ stream is active. Do not restore the desktop default from a stream hook; use
 
 ## September 2026 audio isolation regression
 
-The first Big Walk report was a routing failure, not a missing game signal.
+The initial report was a routing failure, not a missing game signal.
 Sunshine requested `sink-sunshine-stereo` as the shared PulseAudio default.
 `PULSE_SINK` only selects an initial target; WirePlumber's follow-default
 policy could move both existing and new playback streams, including Sunshine's
-recording from a sink monitor. Restoring AOC HDMI-0 during the stream therefore
-moved Big Walk audio to the PC and made Sunshine capture desktop audio. A
+recording from a sink monitor. Restoring a physical output during the stream
+therefore moved game audio to the host and made Sunshine capture desktop audio. A
 second contributor was deployment drift: the live restore script was an older
 branch copy, so source changes were not reflected in `~/.config`.
 
@@ -340,7 +338,7 @@ The final fix is synchronous policy enforcement:
 
 - `pipewire/sunshine-host-default.lua` removes `sink-sunshine-*` from
   WirePlumber's default candidates before selection and preserves the current
-  physical default (AOC HDMI-0 or AirPods) when Sunshine requests its sink.
+  physical default when Sunshine requests its sink.
 - `systemd/sway-audio-routing.conf` pins Sway's PulseAudio and native PipeWire
   clients to `sink-sunshine-stereo` with `node.dont-move=true`,
   `node.dont-fallback=true`, and `state.restore-target=false`.
@@ -363,14 +361,14 @@ systemctl --user restart wireplumber.service sway-sunshine.service sunshine-head
 This installs the WirePlumber script and component config plus both systemd
 drop-ins without changing display or app configuration.
 
-Validate during a Big Walk stream with:
+Validate during a game stream with:
 
 ```bash
-python3 tests/check-audio-isolation.py --game-name 'Big Walk.exe'
+python3 tests/check-audio-isolation.py --game-name '<application name>'
 ```
 
 The check must report `PASS`; the host default must remain a physical sink,
-Big Walk must target `sink-sunshine-stereo`, and Sunshine must capture
+The game must target `sink-sunshine-stereo`, and Sunshine must capture
 `sink-sunshine-stereo.monitor`.
 
 Future maintenance rules:
@@ -378,14 +376,14 @@ Future maintenance rules:
 - Edit repository sources and deploy through `install.sh`; do not hand-edit
   live WirePlumber, systemd, PipeWire, or Sunshine copies.
 - Keep sink names, not volatile sink indices, in the host preference. Use
-  `set-host-audio-sink.sh` when switching between AOC HDMI-0 and AirPods.
+  `set-host-audio-sink.sh` when switching physical outputs.
 - Run the validation after PipeWire, WirePlumber, Sunshine, or Moonlight
-  upgrades, including AOC/AirPods selection, reconnects, and a native desktop
-  PipeWire stream.
+  upgrades, including physical-output selection, reconnects, and a native
+  desktop PipeWire stream.
 - Keep explicit game and capture targets pinned. Preserve the preselection
   WirePlumber policy; do not reintroduce polling or post-stream default flips.
-- When TV video works but audio is silent, check Moonlight Stereo before
-  changing host routing. Keep test volumes at or below 5%.
+- When client video works but audio is silent, try Moonlight Stereo before
+  changing host routing.
 
 ## install.sh Behavior
 
@@ -400,7 +398,7 @@ The install script:
 - Auto-detects the Wayland display number for the headless session. It no longer trusts the value in the installed service file (that was the bug: it kept the stale `wayland-1` forever). Instead it first tries to **reuse the recorded display file** (`/run/user/$USER_ID/sway-sunshine-display`) only if that socket is currently free; otherwise it **auto-detects the next free number** after the highest existing `wayland-*` socket (with `wayland-1` as the default when no sockets are present)
 - No longer templates `WAYLAND_DISPLAY` into the service files: `sway-sunshine.service` carries no hardcoded display (Sway binds whatever socket is free, and `publish-display.sh` records the real value), while `sunshine-headless.service` reads it via `EnvironmentFile=-/run/user/%U/sway-sunshine-display`
 - Installs the launcher scripts (`start-steam-game.sh`, `start-lutris-game.sh`, `start-heroic-game.sh`) with plain `cp` rather than sed-templating, since each script resolves `WAYLAND_DISPLAY` at runtime from the display file
-- Records the **host audio sink preference**: asks which physical desktop output is preferred (AOC HDMI-0 or AirPods when connected), stores its stable sink name in `~/.config/sway-sunshine/host-audio-sink`, and reuses it while it exists. WirePlumber preserves the live physical default during streams; `set-host-audio-sink.sh` changes the preference and live output without reinstalling.
+- Records the **host audio sink preference**: asks which physical desktop output is preferred, stores its stable sink name in `~/.config/sway-sunshine/host-audio-sink`, and reuses it while it exists. WirePlumber preserves the live physical default during streams; `set-host-audio-sink.sh` changes the preference and live output without reinstalling.
 - Installs the WirePlumber 0.5 default-selection policy and the Sway/Sunshine systemd audio-routing drop-ins. `./install.sh --audio-only` deploys only this audio policy and compatibility hooks for an existing installation; restart the three user services after ending the stream.
 - Replaces the `ExecStart` line in `sunshine-headless.service` **wholesale** with the detected Sunshine path — note this drops the template's `/usr/bin/sg input -c` wrapper, so live units run `/usr/bin/sunshine` directly. If input-group access is ever needed, re-add the wrapper in the template deliberately
 

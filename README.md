@@ -132,7 +132,7 @@ Game audio is routed exclusively to the Moonlight stream without touching your h
 - A persistent PipeWire null sink (`sink-sunshine-stereo`) is created via config drop-in — it always exists, even when Moonlight is disconnected or backgrounded
 - The Sway audio service drop-in assigns `sink-sunshine-stereo` to PulseAudio and native PipeWire applications. Routing properties prevent saved moves, default changes, or a missing sink from sending game audio to desktop speakers
 - `audio_sink = sink-sunshine-stereo` in `sunshine.conf` tells Sunshine to capture from that sink
-- A WirePlumber 0.5 policy excludes Sunshine sinks before desktop default selection. Sunshine's requests to change the default preserve your current physical output, including AOC or Bluetooth headphones. Its recording stream is pinned too
+- A WirePlumber 0.5 policy excludes Sunshine sinks before desktop default selection. Sunshine's requests to change the default preserve the current physical output. Its recording stream is pinned too
 - `restore-default-sink.sh` remains as a compatibility prep hook that stops obsolete watchdogs. No delayed default-sink restoration is needed
 - To change the host sink, use your normal desktop audio controls or `~/.config/sway-sunshine/set-host-audio-sink.sh` (interactive, or pass a sink name). This remains safe during a stream
 - When Moonlight is backgrounded, game audio stays in the persistent null sink (silent) instead of reverting to your host speakers
@@ -143,11 +143,12 @@ policy and service drop-ins without changing display configuration or the app
 catalog. End the stream, then restart `wireplumber`, `sway-sunshine`, and
 `sunshine-headless` user services. The normal installer also installs this policy.
 
-During a Big Walk stream, run `python3 tests/check-audio-isolation.py` to check
-desktop playback, game playback, and Sunshine's recording destination. The
-desktop probe generates digital silence. Use `--game-name` for another game's
-PulseAudio application name. See [the regression investigation](docs/audio-isolation-2026-09.md)
-for the reproduced failure and validation.
+During a stream, run `python3 tests/check-audio-isolation.py --game-name '<application name>'`
+to check desktop playback, game playback, and Sunshine's recording destination.
+The desktop probe generates digital silence; find the game's PulseAudio
+application name with `pactl -f json list sink-inputs`. See [the regression
+investigation](docs/audio-isolation-2026-09.md) for the reproduced failure and
+validation.
 
 ### Dynamic resolution
 
@@ -250,9 +251,9 @@ sudo udevadm trigger --subsystem-match=input
 - Verify `audio_sink = sink-sunshine-stereo` is in `~/.config/sunshine/sunshine.conf`
 - Verify the audio-routing drop-ins exist under `~/.config/systemd/user/sway-sunshine.service.d/` and `sunshine-headless.service.d/`
 - Verify the WirePlumber policy exists under `~/.config/wireplumber/wireplumber.conf.d/` and the script under `~/.local/share/wireplumber/scripts/`
-- Run `python3 tests/check-audio-isolation.py --game-name 'Big Walk.exe'`
-- Confirm the desktop default remains AOC or AirPods while connected; the game should target `sink-sunshine-stereo` and Sunshine should capture `sink-sunshine-stereo.monitor`
-- If the TV has video but no audio, set Moonlight's TV audio configuration to Stereo and reconnect. Sunshine follows the channel count requested by the client; this host-side routing fix cannot correct a TV client that drops the front stereo channels of a surround stream
+- Run `python3 tests/check-audio-isolation.py --game-name '<application name>'`
+- Confirm the desktop default remains a physical output while connected; the game should target `sink-sunshine-stereo` and Sunshine should capture `sink-sunshine-stereo.monitor`
+- If the client has video but no audio, try its Stereo audio configuration and reconnect. Sunshine follows the channel count requested by the client; host routing cannot correct client-side channel-layout incompatibility
 
 ### UPnP port mapping failures
 
