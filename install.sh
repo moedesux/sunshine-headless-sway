@@ -396,6 +396,19 @@ for app in apps:
     cmd = app.get("cmd", "")
     detached = app.get("detached", [])
 
+    # Big Picture must stay attached to Sunshine until Steam exits.  Older
+    # installations used detached, which made Sunshine run the undo hook as
+    # soon as the launcher returned while Steam was still starting.
+    if app.get("name") == "Steam Big Picture" and detached:
+        app["cmd"] = f"{start_steam} bigpicture --wait"
+        app["auto-detach"] = False
+        app.pop("detached", None)
+        prep_cmds = app.get("prep-cmd", [])
+        migrate_prep_undo(prep_cmds, stop_steam)
+        app["prep-cmd"] = dedup_restore(prep_cmds)
+        migrated += 1
+        continue
+
     # Only migrate entries that use steam://run/ format
     match = re.match(r'^steam\s+steam://run/(\d+)$', cmd.strip())
     if not match:

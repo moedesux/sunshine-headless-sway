@@ -4,6 +4,8 @@
 # Migrates Steam from the main desktop if it's running there
 
 APPID="$1"
+WAIT_FOR_EXIT=false
+[ "$2" = "--wait" ] && WAIT_FOR_EXIT=true
 # Resolve the headless session's Wayland display at runtime (the main desktop
 # may occupy wayland-0, wayland-1, or higher depending on DE/uwsm/SDDM).
 WAYLAND_DISPLAY=$(sed -n 's/^WAYLAND_DISPLAY=//p' /run/user/$(id -u)/sway-sunshine-display 2>/dev/null)
@@ -92,3 +94,29 @@ else
 fi
 
 echo "[$(date)] swaymsg exec exit code: $EXEC_CODE, output: $EXEC_OUTPUT" >> "$LOG_FILE"
+
+if [ "$EXEC_CODE" -ne 0 ]; then
+    exit "$EXEC_CODE"
+fi
+
+# Sunshine must keep this application alive for the duration of the stream.
+# Without this, the prep-cmd undo hook runs as soon as swaymsg returns and
+# stops Steam while Big Picture is still starting.
+if [ "$WAIT_FOR_EXIT" = true ]; then
+    started=false
+    for i in $(seq 1 30); do
+        if pgrep -x steam >/dev/null 2>&1; then
+            started=true
+            break
+        fi
+        sleep 1
+    done
+    if [ "$started" != true ]; then
+        echo "[$(date)] ERROR: Steam did not start within 30 seconds" >> "$LOG_FILE"
+        exit 1
+    fi
+    echo "[$(date)] Steam started; waiting for it to exit" >> "$LOG_FILE"
+    while pgrep -x steam >/dev/null 2>&1; do
+        sleep 2
+    done
+fi

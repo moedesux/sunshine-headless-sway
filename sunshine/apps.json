@@ -35,9 +35,8 @@
     },
     {
       "name": "Steam Big Picture",
-      "detached": [
-        "/home/YOUR_USER/.config/sway-sunshine/start-steam-game.sh bigpicture"
-      ],
+      "cmd": "/home/YOUR_USER/.config/sway-sunshine/start-steam-game.sh bigpicture --wait",
+      "auto-detach": false,
       "prep-cmd": [
         {
           "do": "/home/YOUR_USER/.config/sway-sunshine/restore-default-sink.sh",
