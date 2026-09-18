@@ -6,8 +6,35 @@ set -euo pipefail
 
 SWAY_CONFIG_DIR="$HOME/.config/sway-sunshine"
 SUNSHINE_CONFIG_DIR="$HOME/.config/sunshine"
+APOLLO_CONFIG_DIR="$HOME/.config/apollo"
 SYSTEMD_DIR="$HOME/.config/systemd/user"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Deploy the shared Sunshine settings to an existing Apollo installation
+# without touching services, display setup, audio policy, or apps.json.
+if [ "${1:-}" = "--apollo-only" ]; then
+    mkdir -p "$APOLLO_CONFIG_DIR"
+    cp "$SCRIPT_DIR/sunshine/sunshine.conf" "$APOLLO_CONFIG_DIR/sunshine.conf"
+    echo "Installed shared sunshine.conf to Apollo: $APOLLO_CONFIG_DIR/sunshine.conf"
+    exit 0
+fi
+
+# Deploy the repo-managed Apollo streaming unit, stopping Sunshine first.
+if [ "${1:-}" = "--apollo-service-only" ]; then
+    mkdir -p "$SYSTEMD_DIR"
+
+    cp "$SCRIPT_DIR/systemd/sway-sunshine.service" "$SYSTEMD_DIR/sway-sunshine.service"
+    cp "$SCRIPT_DIR/systemd/sunshine-headless.service" "$SYSTEMD_DIR/sunshine-headless.service"
+
+    sed "s|/run/user/1000/|/run/user/$UID/|g" \
+        "$SCRIPT_DIR/systemd/sunshine-headless.service" > "$SYSTEMD_DIR/sunshine-headless.service"
+    systemctl --user daemon-reload
+    systemctl --user disable --now apollo.service 2>/dev/null || true
+    systemctl --user stop sunshine-headless.service 2>/dev/null || true
+    systemctl --user start sunshine-headless.service
+    echo "Started Apollo through sunshine-headless.service"
+    exit 0
+fi
 
 install_audio_policy() {
     local wp_dir="$HOME/.config/wireplumber"
@@ -323,10 +350,11 @@ chmod +x "$SWAY_CONFIG_DIR/stop-heroic-game.sh"
 cp "$SCRIPT_DIR/sway-sunshine/sway-wrapper.sh" "$SWAY_CONFIG_DIR/sway-wrapper.sh"
 chmod +x "$SWAY_CONFIG_DIR/sway-wrapper.sh"
 
-# Sunshine config (always copy from template)
-mkdir -p "$SUNSHINE_CONFIG_DIR"
+# Shared Sunshine/Apollo config (always copy from template to both clients)
+mkdir -p "$SUNSHINE_CONFIG_DIR" "$APOLLO_CONFIG_DIR"
 cp "$SCRIPT_DIR/sunshine/sunshine.conf" "$SUNSHINE_CONFIG_DIR/sunshine.conf"
-echo "Installed sunshine.conf"
+cp "$SCRIPT_DIR/sunshine/sunshine.conf" "$APOLLO_CONFIG_DIR/sunshine.conf"
+echo "Installed shared sunshine.conf for Sunshine and Apollo"
 
 # Apps config (only if not already present)
 if [ ! -f "$SUNSHINE_CONFIG_DIR/apps.json" ]; then
