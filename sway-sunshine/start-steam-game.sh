@@ -1,16 +1,36 @@
 #!/bin/bash
 # Launches a Steam game in the headless Sway session
-# Usage: start-steam-game.sh <appid|bigpicture|0>
+# Usage: start-steam-game.sh <appid|bigpicture|0> [--wait]
 # Migrates Steam from the main desktop if it's running there
 
-APPID="$1"
-WAIT_FOR_EXIT=false
-[ "$2" = "--wait" ] && WAIT_FOR_EXIT=true
+APPID="${1:-}"
+LOG_FILE="$HOME/.config/sway-sunshine/start-steam-game.log"
+
+if [ -z "$APPID" ]; then
+    echo "Usage: $0 <steam_appid|bigpicture|0> [--wait]"
+    exit 1
+fi
+
+# Keep the sleep inhibitor and Steam launcher in the same process lifecycle.
+# systemd-inhibit releases its lock whenever this script exits, including when
+# the launcher is killed or its parent Apollo/Sunshine unit is stopped.
+if [ "${SUNSHINE_STEAM_INHIBITED:-0}" != "1" ]; then
+    if ! command -v systemd-inhibit >/dev/null 2>&1; then
+        echo "[$(date)] ERROR: systemd-inhibit is required for Steam streaming" >> "$LOG_FILE"
+        exit 1
+    fi
+    exec systemd-inhibit \
+        --what=sleep:idle \
+        --mode=block \
+        --who=sunshine-headless-sway \
+        --why="Steam stream active: $APPID" \
+        env SUNSHINE_STEAM_INHIBITED=1 "$0" "$@"
+fi
+
 # Resolve the headless session's Wayland display at runtime (the main desktop
 # may occupy wayland-0, wayland-1, or higher depending on DE/uwsm/SDDM).
 WAYLAND_DISPLAY=$(sed -n 's/^WAYLAND_DISPLAY=//p' /run/user/$(id -u)/sway-sunshine-display 2>/dev/null)
 WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}"
-LOG_FILE="$HOME/.config/sway-sunshine/start-steam-game.log"
 
 # Verify the published display is actually live; fall back to scanning live sockets
 if command -v wayland-info >/dev/null 2>&1 && ! WAYLAND_DISPLAY="$WAYLAND_DISPLAY" wayland-info >/dev/null 2>&1; then
@@ -35,11 +55,6 @@ echo "[$(date)] Launching Steam game $APPID" >> "$LOG_FILE"
 echo "Unlocking session" >> "$LOG_FILE"
 loginctl unlock-session
 
-
-if [ -z "$APPID" ]; then
-    echo "Usage: $0 <steam_appid|bigpicture|0>"
-    exit 1
-fi
 
 # Disable the omarchy screensaver for the duration of this game stream. The
 # GPU-heavy TTE screensaver effect runs on the main Hyprland desktop while the
@@ -99,24 +114,22 @@ if [ "$EXEC_CODE" -ne 0 ]; then
     exit "$EXEC_CODE"
 fi
 
-# Sunshine must keep this application alive for the duration of the stream.
-# Without this, the prep-cmd undo hook runs as soon as swaymsg returns and
-# stops Steam while Big Picture is still starting.
-if [ "$WAIT_FOR_EXIT" = true ]; then
-    started=false
-    for i in $(seq 1 30); do
-        if pgrep -x steam >/dev/null 2>&1; then
-            started=true
-            break
-        fi
-        sleep 1
-    done
-    if [ "$started" != true ]; then
-        echo "[$(date)] ERROR: Steam did not start within 30 seconds" >> "$LOG_FILE"
-        exit 1
+# Keep this launcher (and therefore its inhibitor) alive for every Steam app.
+# The optional --wait argument remains accepted for compatibility with existing
+# generated app entries, but waiting is now the default and only lifecycle.
+started=false
+for i in $(seq 1 30); do
+    if pgrep -x steam >/dev/null 2>&1; then
+        started=true
+        break
     fi
-    echo "[$(date)] Steam started; waiting for it to exit" >> "$LOG_FILE"
-    while pgrep -x steam >/dev/null 2>&1; do
-        sleep 2
-    done
+    sleep 1
+done
+if [ "$started" != true ]; then
+    echo "[$(date)] ERROR: Steam did not start within 30 seconds" >> "$LOG_FILE"
+    exit 1
 fi
+echo "[$(date)] Steam started; waiting for it to exit" >> "$LOG_FILE"
+while pgrep -x steam >/dev/null 2>&1; do
+    sleep 2
+done

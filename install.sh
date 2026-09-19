@@ -148,25 +148,32 @@ else
     esac
 fi
 
-# Check for Sunshine
+# Select the streaming server. Prefer Apollo when both are installed because
+# this setup uses Apollo's extended client and virtual-display features.
 SUNSHINE_PATH=""
-if command -v sunshine &>/dev/null; then
+STREAM_SERVER_NAME=""
+if command -v apollo &>/dev/null; then
+    SUNSHINE_PATH="$(command -v apollo)"
+    STREAM_SERVER_NAME="Apollo"
+elif command -v sunshine &>/dev/null; then
     SUNSHINE_PATH="$(command -v sunshine)"
+    STREAM_SERVER_NAME="Sunshine"
 elif [ -f "$HOME/Apps/sunshine.AppImage" ]; then
     SUNSHINE_PATH="$HOME/Apps/sunshine.AppImage"
+    STREAM_SERVER_NAME="Sunshine"
 else
     echo ""
-    echo "Sunshine not found. Please install it from:"
-    echo "  https://github.com/LizardByte/Sunshine/releases"
+    echo "Apollo or Sunshine not found. Please install a supported streaming server."
     echo ""
-    read -rp "Enter the path to your Sunshine binary/AppImage: " SUNSHINE_PATH
+    read -rp "Enter the path to your Apollo/Sunshine binary or AppImage: " SUNSHINE_PATH
     if [ ! -f "$SUNSHINE_PATH" ]; then
         echo "Error: $SUNSHINE_PATH not found"
         exit 1
     fi
+    STREAM_SERVER_NAME="Streaming server"
 fi
 
-echo "Using Sunshine at: $SUNSHINE_PATH"
+echo "Using $STREAM_SERVER_NAME at: $SUNSHINE_PATH"
 
 # Detect UID for socket paths
 USER_ID=$(id -u)

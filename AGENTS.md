@@ -59,6 +59,31 @@ Replace `"Portal 2"` with the exact app name from `~/.config/sunshine/apps.json`
 
 After testing, disconnect the stream. The prep-cmd undo hooks will run automatically (reset resolution, stop Steam, etc.).
 
+### Steam stream suspend protection
+
+`sway-sunshine/start-steam-game.sh` is the suspend-protection seam for every
+managed Steam launch. Its outer invocation uses `exec systemd-inhibit
+--what=sleep:idle --mode=block` to re-run itself with
+`SUNSHINE_STEAM_INHIBITED=1`, and the inner invocation remains alive until the
+Steam process exits. Preserve this process relationship: the inhibitor must
+share the launcher's lifetime rather than use a PID file, timer, or persistent
+Apollo/Sunshine service lock.
+
+This lifecycle releases the inhibitor after a normal disconnect, Steam exit,
+launcher failure or signal, and Apollo/Sunshine unit termination. It also
+covers legacy `detached` app entries because the launcher now waits for Steam
+unconditionally; `--wait` remains accepted only for compatibility. Do not add
+per-app inhibitor prep hooks or make the persistent streaming service hold the
+lock, because the server runs even when no stream is active.
+
+During a Steam stream, verify the lock with:
+
+```bash
+systemd-inhibit --list | grep sunshine-headless-sway
+```
+
+After disconnecting, the same command must return no matching inhibitor.
+
 ### Vulkan Driver Selection for Sunshine Encoding
 
 **Sunshine's Vulkan encoding uses auto-selection by default.** On this setup, both Sway and Sunshine use Vulkan auto-selection — Sway renders on the NVIDIA GPU (`WLR_DRM_DEVICES=/dev/dri/renderD129`) and Sunshine auto-selects the correct Vulkan ICD for encoding.
@@ -164,12 +189,14 @@ stream because game audio is pinned by the Sway routing drop-in.
 
 ### `start-steam-game.sh`
 Launches a Steam game in the headless Sway session. **Kills ALL Steam processes system-wide** (including any running on the main desktop) before launching in the headless session. Handles:
+- Re-execs itself under a blocking `systemd-inhibit --what=sleep:idle` lock
+- Waits for Steam to exit for every invocation, tying the inhibitor to the Steam stream lifecycle
 - Checks for Sway IPC socket existence (`sway-sunshine.sock`) before launching
 - Graceful shutdown of any existing Steam instance (`steam -shutdown`, wait, force kill)
 - Cleanup of Steam IPC files (`~/.steam/steam.pid`, `/tmp/steam_singleton_*`)
 - **Disables the omarchy screensaver** for the stream via `omarchy-toggle screensaver-off on` (see *Omarchy screensaver toggle* below)
 - Launch via `swaymsg exec` in the headless session
-- Accepts: `<appid>`, `bigpicture`, or `0` (plain Steam)
+- Accepts: `<appid>`, `bigpicture`, or `0` (plain Steam); legacy `--wait` is accepted but no longer changes behavior
 
 ### `stop-steam-game.sh`
 Shuts down ALL Steam processes system-wide and cleans up IPC. Used as **prep-cmd.undo** for Steam entries. Note: does NOT restart Steam on the main desktop. **Re-enables the omarchy screensaver** at stream end via `omarchy-toggle screensaver-off off` (removes the flag that `start-steam-game.sh` created).
@@ -388,6 +415,7 @@ Future maintenance rules:
 ## install.sh Behavior
 
 The install script:
+- Prefers the `apollo` executable when both Apollo and Sunshine are installed; falls back to Sunshine when Apollo is unavailable
 - Templates user ID into `set-resolution.sh` and `reset-resolution.sh` (replaces `/run/user/1000/`)
 - Copies `start-steam-game.sh`, `stop-steam-game.sh`, and `sway-wrapper.sh` to `~/.config/sway-sunshine/`
 - Checks for a stale sway-sunshine session via PID file (`/run/user/$USER_ID/sway-sunshine.pid`), sends SIGINT with 10s grace period, falls back to SIGKILL if needed

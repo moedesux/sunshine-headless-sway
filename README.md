@@ -84,6 +84,20 @@ Edit `~/.config/sunshine/apps.json` to add games. The install script provides te
 }
 ```
 
+`start-steam-game.sh` wraps every Steam launch in a blocking
+`systemd-inhibit --what=sleep:idle` lock and remains alive until Steam exits.
+This prevents desktop idle policy from suspending the host while Moonlight
+input is being delivered to the separate headless Sway session. The inhibitor
+is released automatically when Steam exits, the stream cleanup stops Steam,
+the launcher crashes, or the Apollo/Sunshine user service is terminated. It
+does not remain active merely because the streaming server is running.
+
+Verify the lock during a Steam stream with:
+
+```bash
+systemd-inhibit --list | grep sunshine-headless-sway
+```
+
 ### Lutris games
 
 ```json
@@ -364,7 +378,7 @@ sunshine-headless-sway/
 │   │   ├── set-host-audio-sink.sh  # Change the preferred host audio sink (no reinstall)
 │   │   ├── host-audio-sink         # Recorded host audio sink preference (pulse sink name)
 │   │   ├── publish-display.sh      # Re-publishes the real WAYLAND_DISPLAY after Sway binds
-│   │   ├── start-steam-game.sh     # Launch a Steam game in the headless session
+│   │   ├── start-steam-game.sh     # Launch Steam and inhibit host sleep until it exits
 │   │   ├── stop-steam-game.sh      # Stop Steam (prep-cmd undo for Steam entries)
 │   │   ├── start-lutris-game.sh    # Launch a Lutris game in the headless session
 │   │   ├── stop-lutris-game.sh     # Stop Lutris (prep-cmd undo for Lutris entries)
