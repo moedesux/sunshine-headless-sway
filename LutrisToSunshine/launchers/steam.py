@@ -96,6 +96,23 @@ def list_steam_games() -> List[Tuple[str, str]]:
                         # Filter out non-game items
                         if not any(name.lower().startswith(pattern) for pattern in exclude_patterns):
                             games.append((appid, name))
+
+    # Non-Steam games live in shortcuts.vdf, not in appmanifest files. Steam's
+    # stored appid is a signed 32-bit value; rungameid needs its 64-bit form.
+    shortcuts_path = _get_shortcuts_path()
+    if shortcuts_path:
+        try:
+            with open(shortcuts_path, "rb") as handle:
+                shortcuts = vdf.binary_load(handle).get("shortcuts", {})
+            for entry in shortcuts.values():
+                if not isinstance(entry, dict):
+                    continue
+                appid, name = entry.get("appid"), entry.get("AppName")
+                if isinstance(appid, int) and isinstance(name, str) and name:
+                    game_id = ((appid & 0xFFFFFFFF) << 32) | 0x02000000
+                    games.append((f"shortcut:{game_id}", name))
+        except (OSError, ValueError, TypeError):
+            pass
     
     return games
 

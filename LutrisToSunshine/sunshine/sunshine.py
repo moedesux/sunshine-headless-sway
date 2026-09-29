@@ -763,6 +763,8 @@ def build_game_command(game_id: str, runner) -> Optional[str]:
         return f"{heroic_cmd} heroic://launch/{runner}/{game_id} --no-gui --no-sandbox"
     if runner == "Steam":
         steam_cmd = get_steam_command()
+        if game_id.startswith("shortcut:"):
+            return f"{steam_cmd} steam://rungameid/{game_id.removeprefix('shortcut:')}"
         return f"{steam_cmd} steam://run/{game_id}"
     if runner == "Ryubing":
         return f"flatpak run io.github.ryubing.Ryujinx \"{game_id}\""

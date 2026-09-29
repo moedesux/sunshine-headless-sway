@@ -88,6 +88,11 @@ Interactive import with automatic cover downloads:
 python3 lutristosunshine.py --cover
 ```
 
+Steam games installed through Steam and non-Steam shortcuts from Steam's
+`shortcuts.vdf` appear in the same import list. Non-Steam shortcuts launch
+through Steam's `rungameid` URL, preserving their Steam launch options.
+The headless Steam helper can be updated with `../install.sh --steam-launcher-only`.
+
 Import using a custom Sunshine web UI port:
 
 ```bash

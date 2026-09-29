@@ -10,6 +10,16 @@ APOLLO_CONFIG_DIR="$HOME/.config/apollo"
 SYSTEMD_DIR="$HOME/.config/systemd/user"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Update the Steam launch helper without disturbing running streams or other
+# configuration. New apps can use it on their next launch.
+if [ "${1:-}" = "--steam-launcher-only" ]; then
+    mkdir -p "$SWAY_CONFIG_DIR"
+    cp "$SCRIPT_DIR/sway-sunshine/start-steam-game.sh" "$SWAY_CONFIG_DIR/start-steam-game.sh"
+    chmod +x "$SWAY_CONFIG_DIR/start-steam-game.sh"
+    echo "Installed Steam launcher: $SWAY_CONFIG_DIR/start-steam-game.sh"
+    exit 0
+fi
+
 # Deploy the shared Sunshine settings to an existing Apollo installation
 # without touching services, display setup, audio policy, or apps.json.
 if [ "${1:-}" = "--apollo-only" ]; then

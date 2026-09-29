@@ -103,6 +103,9 @@ if [ "$APPID" = "bigpicture" ]; then
 elif [ "$APPID" = "0" ]; then
     EXEC_OUTPUT=$(SWAYSOCK="$SWAYSOCK" swaymsg exec steam 2>&1)
     EXEC_CODE=$?
+elif [[ "$APPID" =~ ^shortcut:[0-9]+$ ]]; then
+    EXEC_OUTPUT=$(SWAYSOCK="$SWAYSOCK" swaymsg exec "steam steam://rungameid/${APPID#shortcut:}" 2>&1)
+    EXEC_CODE=$?
 else
     EXEC_OUTPUT=$(SWAYSOCK="$SWAYSOCK" swaymsg exec "steam -applaunch $APPID" 2>&1)
     EXEC_CODE=$?
