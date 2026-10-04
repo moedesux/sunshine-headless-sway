@@ -1,5 +1,5 @@
 [Unit]
-Description=Sunshine streaming via headless Sway
+Description=Apollo streaming via headless Sway
 After=sway-sunshine.service
 Requires=sway-sunshine.service
 
@@ -14,7 +14,9 @@ Environment=__NV_PRIME_RENDER_OFFLOAD=1
 Environment=__VK_LAYER_NV_optimus=NVIDIA_only
 UnsetEnvironment=__EGL_VENDOR_LIBRARY_FILENAMES
 ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do [ -n "$(find /run/user/1000/sway-sunshine-display -newer /run/user/1000/sway-sunshine.pid -print 2>/dev/null)" ] && exit 0; sleep 0.5; done; exit 0'
-ExecStart=/usr/bin/sg input -c /usr/bin/sunshine
+# ExecStart=/usr/bin/sg input -c /usr/bin/sunshine
+ExecStart=/usr/bin/apollo
+#ExecStart=/usr/bin/sg input -c /usr/bin/apollo
 Restart=on-failure
 RestartSec=5
 
