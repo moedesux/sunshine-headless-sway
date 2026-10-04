@@ -10,6 +10,23 @@ from sunshine import sunshine
 
 
 class SteamShortcutTests(unittest.TestCase):
+    def test_import_quotes_executable_path_with_spaces(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            config = os.path.join(root, "userdata", "123", "config")
+            os.makedirs(config)
+            path = os.path.join(config, "shortcuts.vdf")
+            with open(path, "wb") as handle:
+                vdf.binary_dump({"shortcuts": {}}, handle)
+
+            with patch.object(steam, "_get_shortcuts_path", return_value=path):
+                self.assertTrue(steam.add_nonsteam_game_to_vdf(
+                    "Split Fiction", "/games/Split Fiction/SplitFiction.exe"
+                ))
+
+            with open(path, "rb") as handle:
+                entry = next(iter(vdf.binary_load(handle)["shortcuts"].values()))
+            self.assertEqual(entry["Exe"], '"/games/Split Fiction/SplitFiction.exe"')
+
     def test_nonsteam_shortcut_is_listed_with_launchable_id(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             config = os.path.join(root, "userdata", "123", "config")

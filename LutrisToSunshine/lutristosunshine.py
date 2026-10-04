@@ -819,9 +819,8 @@ def handle_to_steam_command(args) -> int:
     # Check if Steam is running
     steam_running = run_command("pgrep -x steam").returncode == 0
     if steam_running:
-        print("Warning: Steam is running. It must be closed to add non-Steam games.")
-        if not get_yes_no_input("Close Steam and continue?", default=False):
-            return 1
+        print("Error: Steam is running. Close Steam completely, then rerun this command.")
+        return 1
 
     # List Lutris games with resolved paths
     print("Resolving Lutris game paths...")
@@ -850,7 +849,8 @@ def handle_to_steam_command(args) -> int:
     # Display and select
     print("")
     for idx, (gid, name, cmd) in enumerate(available_games):
-        exe = cmd.split()[0] if cmd.split() else "?"
+        parts = shlex.split(cmd)
+        exe = parts[0] if parts else "?"
         print(f"{idx + 1}. {name}")
         print(f"   {muted(exe)}")
 

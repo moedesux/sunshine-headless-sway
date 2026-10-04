@@ -214,7 +214,7 @@ def _get_steam_grid_dir() -> Optional[str]:
 def _next_shortcuts_key(shortcuts: Dict[str | int, object]) -> str | int:
     """Generate a new unique key for a shortcuts entry."""
     if not shortcuts:
-        return 0
+        return "0"
     # vdf may parse keys as strings or ints — handle both
     max_key = max(shortcuts.keys())
     if isinstance(max_key, str):
@@ -223,7 +223,7 @@ def _next_shortcuts_key(shortcuts: Dict[str | int, object]) -> str | int:
             return str(int(max_key) + 1)
         except ValueError:
             return "999999"
-    return max_key + 1
+    return str(max_key + 1)
 
 
 def _save_hero_image(game_name: str, icon_path: str, grid_dir: str) -> Optional[str]:
@@ -325,7 +325,7 @@ def add_nonsteam_game_to_vdf(
     entry: Dict[str, object] = {
         "appid": game_appid,  # Non-Steam game (positive 31-bit int for unique hero filename)
         "AppName": game_name,
-        "Exe": exe_path,
+        "Exe": f'"{exe_path}"' if any(char.isspace() for char in exe_path) else exe_path,
         "IsHidden": False,
         "AllowDesktopConfig": False,
         "AllowOverlay": True,

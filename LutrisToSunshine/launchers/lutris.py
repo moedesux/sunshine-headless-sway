@@ -103,10 +103,9 @@ def resolve_lutris_game(slug: str) -> Optional[Dict[str, str]]:
         return None
 
     # Build resolved command
+    resolved_cmd = shlex.quote(exe)
     if args:
-        resolved_cmd = f'"{exe}" {args}'
-    else:
-        resolved_cmd = exe
+        resolved_cmd += f" {args}"
 
     return {
         "exe": exe,
